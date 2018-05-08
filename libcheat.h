@@ -62,17 +62,26 @@ enum {
     CR_STOPPER = -2,
 };
 
-typedef void* (*cheat_get_addr_t)(uint32_t addr, int need_conv);
-typedef int (*cheat_is_pressed)(uint32_t buttons);
-typedef void (*cheat_delay_cb_t)(uint32_t millisec);
-typedef void *(*cheat_realloc_t)(void *ptr, size_t size);
-typedef void (*cheat_free_t)(void *ptr);
+typedef int   (*cheat_read_cb_t)(uint32_t addr, void *data, int len, int need_conv);
+typedef int   (*cheat_write_cb_t)(uint32_t addr, const void *data, int len, int need_conv);
+// transform data, 0-INCR 1-DECR 2-OR 3-AND 4-XOR
+typedef int   (*cheat_trans_cb_t)(uint32_t addr, uint32_t value, int len, int op, int need_conv);
+typedef int   (*cheat_copy_cb_t)(uint32_t toaddr, uint32_t fromaddr, int len, int need_conv);
+typedef int   (*cheat_button_cb_t)(uint32_t buttons);
+typedef void  (*cheat_delay_cb_t)(uint32_t millisec);
+typedef void  *(*cheat_realloc_t)(void *ptr, size_t size);
+typedef void  (*cheat_free_t)(void *ptr);
 
 typedef struct cheat_t cheat_t;
 
 cheat_t *   cheat_new(uint8_t type);
 cheat_t *   cheat_new2(uint8_t type, cheat_realloc_t r, cheat_free_t f);
-void        cheat_set_callbacks(cheat_t *ch, cheat_get_addr_t addr_cb, cheat_is_pressed input_cb, cheat_delay_cb_t delay_cb);
+void        cheat_set_read_cb(cheat_t *ch, cheat_read_cb_t cb);
+void        cheat_set_write_cb(cheat_t *ch, cheat_write_cb_t cb);
+void        cheat_set_trans_cb(cheat_t *ch, cheat_trans_cb_t cb);
+void        cheat_set_copy_cb(cheat_t *ch, cheat_copy_cb_t cb);
+void        cheat_set_button_cb(cheat_t *ch, cheat_button_cb_t cb);
+void        cheat_set_delay_cb(cheat_t *ch, cheat_delay_cb_t cb);
 void        cheat_finish(cheat_t *ch);
 uint8_t     cheat_get_type(cheat_t *ch);
 const char *cheat_get_titleid(cheat_t *ch);

@@ -2,7 +2,6 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
 
 #define CAPACITY_INIT      (32)
 #define CAPACITY_INCREMENT (32)
@@ -14,8 +13,11 @@ enum {
 
 typedef struct cheat_t {
     // Callback functions
-    cheat_get_addr_t  addr_cb;
-    cheat_is_pressed  input_cb;
+    cheat_read_cb_t   read_cb;
+    cheat_write_cb_t  write_cb;
+    cheat_copy_cb_t   copy_cb;
+    cheat_trans_cb_t  trans_cb;
+    cheat_button_cb_t input_cb;
     cheat_delay_cb_t  delay_cb;
     // allocator functions
     cheat_realloc_t   realloc_func;
@@ -34,6 +36,29 @@ typedef struct cheat_t {
     cheat_code_t      *codes;
 } cheat_t;
 
+int default_read_cb(uint32_t addr, void *data, int len, int need_conv) {
+    return -1;
+}
+
+int default_write_cb(uint32_t addr, const void *data, int len, int need_conv) {
+    return -1;
+}
+
+int default_trans_cb(uint32_t addr, uint32_t value, int len, int op, int need_conv) {
+    return -1;
+}
+
+int default_copy_cb(uint32_t toaddr, uint32_t fromaddr, int len, int need_conv) {
+    return -1;
+}
+
+int default_button_cb(uint32_t buttons) {
+    return 0;
+}
+
+void default_delay_cb(uint32_t millisec) {
+}
+
 cheat_t *cheat_new(uint8_t type) {
     return cheat_new2(type, realloc, free);
 }
@@ -43,9 +68,12 @@ cheat_t *cheat_new2(uint8_t type, cheat_realloc_t r, cheat_free_t f) {
     if (ch == NULL) return NULL;
     ch->codes = (cheat_code_t*)r(NULL, CAPACITY_INIT * sizeof(cheat_code_t));
 
-    ch->addr_cb  = NULL;
-    ch->input_cb = NULL;
-    ch->delay_cb = NULL;
+    ch->read_cb  = default_read_cb;
+    ch->write_cb = default_write_cb;
+    ch->trans_cb = default_trans_cb;
+    ch->copy_cb  = default_copy_cb;
+    ch->input_cb = default_button_cb;
+    ch->delay_cb = default_delay_cb;
 
     ch->realloc_func = r;
     ch->free_func = f;
@@ -59,10 +87,46 @@ cheat_t *cheat_new2(uint8_t type, cheat_realloc_t r, cheat_free_t f) {
     return ch;
 }
 
-void cheat_set_callbacks(cheat_t *ch, cheat_get_addr_t addr_cb, cheat_is_pressed input_cb, cheat_delay_cb_t delay_cb) {
-    ch->addr_cb  = addr_cb;
-    ch->input_cb = input_cb;
-    ch->delay_cb = delay_cb;
+void cheat_set_read_cb(cheat_t *ch, cheat_read_cb_t cb) {
+    if (cb == NULL)
+        ch->read_cb = default_read_cb;
+    else
+        ch->read_cb = cb;
+}
+
+void cheat_set_write_cb(cheat_t *ch, cheat_write_cb_t cb) {
+    if (cb == NULL)
+        ch->write_cb = default_write_cb;
+    else
+        ch->write_cb = cb;
+}
+
+void cheat_set_trans_cb(cheat_t *ch, cheat_trans_cb_t cb) {
+    if (cb == NULL)
+        ch->trans_cb = default_trans_cb;
+    else
+        ch->trans_cb = cb;
+}
+
+void cheat_set_copy_cb(cheat_t *ch, cheat_copy_cb_t cb) {
+    if (cb == NULL)
+        ch->copy_cb = default_copy_cb;
+    else
+        ch->copy_cb = cb;
+}
+
+void cheat_set_button_cb(cheat_t *ch, cheat_button_cb_t cb) {
+    if (cb == NULL)
+        ch->input_cb = default_button_cb;
+    else
+        ch->input_cb = cb;
+}
+
+void cheat_set_delay_cb(cheat_t *ch, cheat_delay_cb_t cb) {
+    if (cb == NULL)
+        ch->delay_cb = default_delay_cb;
+    else
+        ch->delay_cb = cb;
 }
 
 void cheat_finish(cheat_t *ch) {
@@ -501,20 +565,6 @@ int cheat_add(cheat_t *ch, const char *line) {
     return code.extra ? CR_MORELINE : CR_OK;
 }
 
-static inline void _set_value(void *addr, uint8_t type, uint32_t value) {
-    switch(type) {
-        case CT_I8:
-            memcpy(addr, &value, 1);
-            break;
-        case CT_I16:
-            memcpy(addr, &value, 2);
-            break;
-        case CT_I32:
-            memcpy(addr, &value, 4);
-            break;
-    }
-}
-
 void cheat_apply(cheat_t *ch) {
     int i;
     int e = ch->lines;
@@ -522,41 +572,35 @@ void cheat_apply(cheat_t *ch) {
         cheat_code_t *c = &ch->codes[i];
         i += c->extra;
 
-#define REAL_ADDR(addr, oaddr) void *(addr) = ch->addr_cb ? ch->addr_cb((oaddr), 1) : (void*)(oaddr); if ((addr) == NULL) continue
-#define REAL_ADDR_RETURN(addr, oaddr) void *(addr) = ch->addr_cb ? ch->addr_cb((oaddr), 1) : (void*)(oaddr); if ((addr) == NULL) return
-#define UNREAL_ADDR(addr, raddr) void *(addr) = ch->addr_cb ? ch->addr_cb((raddr), 0) : (void*)(raddr); if ((addr) == NULL) continue
         switch(c->op) {
             case CO_WRITE: {
-                REAL_ADDR(addr, c->addr);
-                _set_value(addr, c->type, c->value);
+                ch->write_cb(c->addr, &c->value, c->type, 1);
                 break;
             }
             case CO_INCR: {
-                REAL_ADDR(addr, c->addr);
                 switch(c->type) {
                 case CT_I8:
-                    _set_value(addr, CT_I8, *(uint8_t*)addr + c->value);
+                    ch->trans_cb(c->addr, c->value, 1, 0, 1);
                     break;
                 case CT_I16:
-                    _set_value(addr, CT_I16, *(uint16_t*)addr + c->value);
+                    ch->trans_cb(c->addr, c->value, 2, 0, 1);
                     break;
                 case CT_I32:
-                    _set_value(addr, CT_I32, *(uint32_t*)addr + c->value);
+                    ch->trans_cb(c->addr, c->value, 4, 0, 1);
                     break;
                 }
                 break;
             }
             case CO_DECR: {
-                REAL_ADDR(addr, c->addr);
                 switch(c->type) {
                 case CT_I8:
-                    _set_value(addr, CT_I8, *(uint8_t*)addr - c->value);
+                    ch->trans_cb(c->addr, c->value, 1, 1, 1);
                     break;
                 case CT_I16:
-                    _set_value(addr, CT_I16, *(uint16_t*)addr - c->value);
+                    ch->trans_cb(c->addr, c->value, 2, 1, 1);
                     break;
                 case CT_I32:
-                    _set_value(addr, CT_I32, *(uint32_t*)addr - c->value);
+                    ch->trans_cb(c->addr, c->value, 4, 1, 1);
                     break;
                 }
                 break;
@@ -564,15 +608,14 @@ void cheat_apply(cheat_t *ch) {
             case CO_MULWRITE: {
                 if (i >= e) continue;
                 cheat_code_t *c2 = &ch->codes[i];
-                REAL_ADDR(addr, c->addr);
-                uint32_t *addr_s = (uint32_t*)addr;
+                uint32_t addr_s = c->addr;
                 uint32_t count = c->value >> 16;
-                uint32_t off = c->value & 0xFFFFU;
+                uint32_t off = (c->value & 0xFFFFU) * 4;
                 uint32_t value = c2->addr;
                 uint32_t incr = c2->value;
                 uint32_t i;
                 for (i = 0; i < count; ++i) {
-                    _set_value(addr_s, CT_I32, value);
+                    ch->write_cb(c->addr, &value, 4, 1);
                     addr_s += off;
                     value += incr;
                 }
@@ -581,27 +624,27 @@ void cheat_apply(cheat_t *ch) {
             case CO_MULWRITE2: {
                 if (i >= e) continue;
                 cheat_code_t *c2 = &ch->codes[i];
-                REAL_ADDR(addr, c->addr);
                 uint32_t count = c->value >> 16;
+                uint32_t addr = c->addr;
                 uint32_t off = c->value & 0xFFFFU;
                 uint32_t value = c2->addr;
                 uint32_t incr = c2->value;
                 uint32_t i;
                 switch (c->type) {
                     case CT_I8: {
-                        uint8_t *addr_s = (uint8_t*)addr;
                         for (i = 0; i < count; ++i) {
-                            _set_value(addr_s, CT_I8, value);
-                            addr_s += off;
+                            ch->write_cb(addr, &value, 1, 1);
+                            addr += off;
                             value += incr;
                         }
                         break;
                     }
                     case CT_I16: {
+                        off *= 2;
                         uint16_t *addr_s = (uint16_t*)addr;
                         for (i = 0; i < count; ++i) {
-                            _set_value(addr_s, CT_I16, value);
-                            addr_s += off;
+                            ch->write_cb(addr, &value, 2, 1);
+                            addr += off;
                             value += incr;
                         }
                         break;
@@ -610,82 +653,79 @@ void cheat_apply(cheat_t *ch) {
                 break;
             }
             case CO_COPY: {
+                cheat_code_t *c2;
                 if (i >= e) continue;
-                cheat_code_t *c2 = &ch->codes[i];
-                REAL_ADDR(addr, c->addr);
-                REAL_ADDR(addr2, c2->addr);
-                memcpy(addr, addr2, c->value);
+                c2 = &ch->codes[i];
+                ch->copy_cb(c->addr, c2->addr, c->value, 1);
                 break;
             }
             case CO_PTRWRITE: {
                 if (i >= e) continue;
                 cheat_code_t *c2 = &ch->codes[i];
-                REAL_ADDR(addr, c->addr);
-                UNREAL_ADDR(addr2, *(uint32_t*)addr);
-                _set_value((uint8_t*)addr2 + c2->value, c->type, c->value);
+                uint32_t addr2;
+                if (ch->read_cb(c->addr, &addr2, 4, 1) < 0) continue;
+                ch->write_cb(addr2 + c2->value, &c->value, c->type, 0);
                 break;
             }
             case CO_BITOR: {
-                REAL_ADDR(addr, c->addr);
-                switch (c->type) {
-                    case CT_I8:
-                        _set_value(addr, CT_I8, *(uint8_t*)addr | c->value);
-                        break;
-                    case CT_I16:
-                        _set_value(addr, CT_I16, *(uint16_t*)addr | c->value);
-                        break;
-                    case CT_I32:
-                        _set_value(addr, CT_I32, *(uint32_t*)addr | c->value);
-                        break;
+                switch(c->type) {
+                case CT_I8:
+                    ch->trans_cb(c->addr, c->value, 1, 2, 1);
+                    break;
+                case CT_I16:
+                    ch->trans_cb(c->addr, c->value, 2, 2, 1);
+                    break;
+                case CT_I32:
+                    ch->trans_cb(c->addr, c->value, 4, 2, 1);
+                    break;
                 }
                 break;
             }
             case CO_BITAND: {
-                REAL_ADDR(addr, c->addr);
-                switch (c->type) {
-                    case CT_I8:
-                        _set_value(addr, CT_I8, *(uint8_t*)addr & c->value);
-                        break;
-                    case CT_I16:
-                        _set_value(addr, CT_I16, *(uint16_t*)addr & c->value);
-                        break;
-                    case CT_I32:
-                        _set_value(addr, CT_I32, *(uint32_t*)addr & c->value);
-                        break;
+                switch(c->type) {
+                case CT_I8:
+                    ch->trans_cb(c->addr, c->value, 1, 3, 1);
+                    break;
+                case CT_I16:
+                    ch->trans_cb(c->addr, c->value, 2, 3, 1);
+                    break;
+                case CT_I32:
+                    ch->trans_cb(c->addr, c->value, 4, 3, 1);
+                    break;
                 }
                 break;
             }
             case CO_BITXOR: {
-                REAL_ADDR(addr, c->addr);
-                switch (c->type) {
-                    case CT_I8:
-                        _set_value(addr, CT_I8, *(uint8_t*)addr ^ c->value);
-                        break;
-                    case CT_I16:
-                        _set_value(addr, CT_I16, *(uint16_t*)addr ^ c->value);
-                        break;
-                    case CT_I32:
-                        _set_value(addr, CT_I32, *(uint32_t*)addr ^ c->value);
-                        break;
+                switch(c->type) {
+                case CT_I8:
+                    ch->trans_cb(c->addr, c->value, 1, 4, 1);
+                    break;
+                case CT_I16:
+                    ch->trans_cb(c->addr, c->value, 2, 4, 1);
+                    break;
+                case CT_I32:
+                    ch->trans_cb(c->addr, c->value, 4, 4, 1);
+                    break;
                 }
                 break;
             }
             case CO_DELAY: {
-                if (ch->delay_cb) ch->delay_cb(c->value);
+                ch->delay_cb(c->value);
                 break;
             }
             case CO_STOPPER: {
-                REAL_ADDR_RETURN(addr, c->addr);
-                if (*(uint32_t*)addr != c->value) i = e;
+                uint32_t val;
+                if (ch->read_cb(c->addr, &val, 4, 1) < 0) continue;
+                if (val != c->value) i = e;
                 break;
             }
             case CO_PRESSED: {
-                if (!ch->input_cb || !ch->input_cb(c->value))
+                if (!ch->input_cb(c->value))
                     i += c->addr;
                 break;
             }
             case CO_NOTPRESSED: {
-                if (!ch->input_cb || ch->input_cb(c->value))
+                if (ch->input_cb(c->value))
                     i += c->addr;
                 break;
             }
@@ -696,7 +736,6 @@ void cheat_apply(cheat_t *ch) {
                 uint32_t skip;
                 uint32_t value;
                 uint32_t cvalue;
-                REAL_ADDR_RETURN(addr, c->addr);
                 if (c->extra) {
                     if (i >= e) continue;
                     cheat_code_t *c2 = &ch->codes[i];
@@ -708,13 +747,13 @@ void cheat_apply(cheat_t *ch) {
                 }
                 switch(c->type) {
                     case CT_I8:
-                        cvalue = *(uint8_t*)addr;
+                        if (ch->read_cb(c->addr, &cvalue, 1, 1) < 0) continue;
                         break;
                     case CT_I16:
-                        cvalue = *(uint16_t*)addr;
+                        if (ch->read_cb(c->addr, &cvalue, 2, 1) < 0) continue;
                         break;
                     case CT_I32:
-                        cvalue = *(uint32_t*)addr;
+                        if (ch->read_cb(c->addr, &cvalue, 4, 1) < 0) continue;
                         break;
                 }
                 switch(c->op) {
