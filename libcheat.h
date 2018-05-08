@@ -18,29 +18,38 @@ enum {
     CO_DECR,
     CO_MULWRITE,
     CO_MULWRITE2,
+    CO_COPY,
     CO_PTRWRITE,
     CO_BITOR,
     CO_BITAND,
     CO_BITXOR,
     CO_DELAY,
     CO_STOPPER,
+    CO_PRESSED,
+    CO_NOTPRESSED,
+    CO_IFEQUAL,
+    CO_IFNEQUAL,
+    CO_IFLESS,
+    CO_IFGREATER,
     CO_DATA, // used as data for multi-line cheat
 };
 
 enum {
-    CT_I8 = 0,
-    CT_I16 = 1,
-    CT_I32 = 2,
+    CT_NONE = 0,
+    CT_I8 = 1,
+    CT_I16 = 2,
+    CT_I24 = 3, /* currently not used */
+    CT_I32 = 4,
 };
 
 // Cheat code struct
 typedef struct cheat_code_t {
-    uint8_t    op;          // operation
-    uint8_t    type;        // data type
-    uint8_t    status;      // 0-disabled 1-enabled
-    uint8_t    extra;       // extra lines used by this code
-    uint32_t   addr;
-    uint32_t   value;
+    uint8_t  op;      // operation
+    uint8_t  type;    // data type
+    uint8_t  status;  // 0-disabled 1-enabled
+    uint8_t  extra;   // extra lines used by this code
+    uint32_t addr;
+    uint32_t value;
 } cheat_code_t;
 
 // Results
@@ -53,25 +62,23 @@ enum {
     CR_STOPPER = -2,
 };
 
-typedef uint32_t (*cheat_addr_conv_t)(uint32_t addr);
-typedef int (*cheat_read_cb_t)(uint32_t addr, void *data, int len);
-typedef int (*cheat_write_cb_t)(uint32_t addr, const void *data, int len);
+typedef void* (*cheat_get_addr_t)(uint32_t addr, int need_conv);
+typedef int (*cheat_is_pressed)(uint32_t buttons);
 typedef void (*cheat_delay_cb_t)(uint32_t millisec);
-typedef void *(*cheat_alloc_t)(size_t size);
 typedef void *(*cheat_realloc_t)(void *ptr, size_t size);
 typedef void (*cheat_free_t)(void *ptr);
 
 typedef struct cheat_t cheat_t;
 
 cheat_t *   cheat_new(uint8_t type);
-cheat_t *   cheat_new2(uint8_t type, cheat_alloc_t a, cheat_realloc_t r, cheat_free_t f);
-void        cheat_set_callbacks(cheat_t *ch, cheat_addr_conv_t conv_cb, cheat_read_cb_t read_cb, cheat_write_cb_t write_cb, cheat_delay_cb_t delay_cb);
+cheat_t *   cheat_new2(uint8_t type, cheat_realloc_t r, cheat_free_t f);
+void        cheat_set_callbacks(cheat_t *ch, cheat_get_addr_t addr_cb, cheat_is_pressed input_cb, cheat_delay_cb_t delay_cb);
 void        cheat_finish(cheat_t *ch);
 uint8_t     cheat_get_type(cheat_t *ch);
 const char *cheat_get_titleid(cheat_t *ch);
 void        cheat_reset(cheat_t *ch);
+int         cheat_get_codes(cheat_t *ch, cheat_code_t **codes);
 int         cheat_add(cheat_t *ch, const char *line);
 void        cheat_apply(cheat_t *ch);
-int         cheat_get_codes(cheat_t *ch, cheat_code_t **codes);
 
 #endif // __LIBCHEAT_H_

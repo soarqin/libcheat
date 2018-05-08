@@ -2,6 +2,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 #define CAPACITY_INIT      (32)
 #define CAPACITY_INCREMENT (32)
@@ -13,12 +14,10 @@ enum {
 
 typedef struct cheat_t {
     // Callback functions
-    cheat_addr_conv_t conv_cb;
-    cheat_read_cb_t   read_cb;
-    cheat_write_cb_t  write_cb;
+    cheat_get_addr_t  addr_cb;
+    cheat_is_pressed  input_cb;
     cheat_delay_cb_t  delay_cb;
     // allocator functions
-    cheat_alloc_t     alloc_func;
     cheat_realloc_t   realloc_func;
     cheat_free_t      free_func;
     // code type
@@ -32,38 +31,22 @@ typedef struct cheat_t {
     // array capacity
     int               capacity;
     // cheat codes
-    cheat_code_t      codes[];
+    cheat_code_t      *codes;
 } cheat_t;
 
-static uint32_t default_conv_cb(uint32_t addr) {
-    return addr;
-}
-
-static int default_read_cb(uint32_t addr, void *data, int len) {
-    memcpy(data, (const void *)(uintptr_t)addr, len);
-    return len;
-}
-
-static int default_write_cb(uint32_t addr, const void *data, int len) {
-    memcpy((void *)(uintptr_t)addr, data, len);
-    return len;
-}
-
-
 cheat_t *cheat_new(uint8_t type) {
-    return cheat_new2(type, malloc, realloc, free);
+    return cheat_new2(type, realloc, free);
 }
 
-cheat_t *cheat_new2(uint8_t type, cheat_alloc_t a, cheat_realloc_t r, cheat_free_t f) {
-    cheat_t *ch = (cheat_t*)a(sizeof(cheat_t) + CAPACITY_INIT * sizeof(cheat_code_t));
+cheat_t *cheat_new2(uint8_t type, cheat_realloc_t r, cheat_free_t f) {
+    cheat_t *ch = (cheat_t*)r(NULL, sizeof(cheat_t));
     if (ch == NULL) return NULL;
+    ch->codes = (cheat_code_t*)r(NULL, CAPACITY_INIT * sizeof(cheat_code_t));
 
-    ch->conv_cb = NULL;
-    ch->read_cb = NULL;
-    ch->write_cb = NULL;
+    ch->addr_cb  = NULL;
+    ch->input_cb = NULL;
     ch->delay_cb = NULL;
 
-    ch->alloc_func = a;
     ch->realloc_func = r;
     ch->free_func = f;
 
@@ -76,14 +59,15 @@ cheat_t *cheat_new2(uint8_t type, cheat_alloc_t a, cheat_realloc_t r, cheat_free
     return ch;
 }
 
-void cheat_set_callbacks(cheat_t *ch, cheat_addr_conv_t conv_cb, cheat_read_cb_t read_cb, cheat_write_cb_t write_cb, cheat_delay_cb_t delay_cb) {
-    ch->conv_cb = conv_cb;
-    ch->read_cb = read_cb;
-    ch->write_cb = write_cb;
+void cheat_set_callbacks(cheat_t *ch, cheat_get_addr_t addr_cb, cheat_is_pressed input_cb, cheat_delay_cb_t delay_cb) {
+    ch->addr_cb  = addr_cb;
+    ch->input_cb = input_cb;
     ch->delay_cb = delay_cb;
 }
 
 void cheat_finish(cheat_t *ch) {
+    ch->lines = 0;
+    ch->free_func(ch->codes);
     ch->free_func(ch);
 }
 
@@ -100,9 +84,14 @@ void cheat_reset(cheat_t *ch) {
     ch->titleid[0] = 0;
     ch->lines = 0;
     if (ch->capacity > CAPACITY_INIT) {
-        ch = (cheat_t*)ch->realloc_func(ch, sizeof(cheat_t) + CAPACITY_INIT * sizeof(cheat_code_t));
+        ch->codes = (cheat_code_t*)ch->realloc_func(ch->codes, CAPACITY_INIT * sizeof(cheat_code_t));
         ch->capacity = CAPACITY_INIT;
     }
+}
+
+int cheat_get_codes(cheat_t *ch, cheat_code_t **codes) {
+    *codes = ch->codes;
+    return ch->lines;
 }
 
 static inline uint32_t get_code_value(const char *s) {
@@ -123,23 +112,22 @@ static inline int add_cwcheat_code(cheat_t *ch, cheat_code_t *code, uint32_t val
     if (ch->lines > 0) {
         cheat_code_t *last = &ch->codes[ch->lines - 1];
         if (last->extra > 0) {
+            code->op     = CO_DATA;
             code->status = last->status;
+            code->extra = 0;
             switch (last->op) {
                 case CO_INCR:
                 case CO_DECR:
-                    last->extra = 0;
                     last->value = val1;
+                    code->addr  = 0;
+                    code->value = 0;
                     return CR_MERGED;
                 case CO_MULWRITE:
-                    code->op    = CO_MULWRITE;
                     code->type  = CT_I32;
-                    code->extra = 0;
                     code->addr  = val1;
                     code->value = val2;
                     return CR_OK;
                 case CO_MULWRITE2:
-                    code->op    = CO_MULWRITE2;
-                    code->extra = 0;
                     code->value = val2;
                     switch(val1 >> 28) {
                         case 0:
@@ -156,10 +144,13 @@ static inline int add_cwcheat_code(cheat_t *ch, cheat_code_t *code, uint32_t val
                             return CR_INVALID;
                     }
                     return CR_OK;
+                case CO_COPY:
+                    code->type  = CT_NONE;
+                    code->addr  = val1;
+                    code->value = 0;
+                    return CR_OK;
                 case CO_PTRWRITE:
-                    code->op    = CO_PTRWRITE;
                     code->addr  = 0;
-                    code->extra = 0;
                     if ((val1 & 0xFFFFU) != 1) return CR_INVALID;
                     switch (val1 >> 16) {
                         case 0:
@@ -196,10 +187,29 @@ static inline int add_cwcheat_code(cheat_t *ch, cheat_code_t *code, uint32_t val
                             code->type  = CT_I32;
                             code->value = ~(val2 - 1);
                             break;
-                        default:
-                            return CR_INVALID;
+                        default: return CR_INVALID;
                     }
                     return CR_OK;
+                case CO_IFEQUAL:
+                case CO_IFNEQUAL:
+                case CO_IFLESS:
+                case CO_IFGREATER:
+                    switch (val2 & 0x0F) {
+                        case 0:
+                            last->type = code->type = CT_I8;
+                            break;
+                        case 1:
+                            last->type = code->type = CT_I16;
+                            break;
+                        case 2:
+                            last->type = code->type = CT_I32;
+                            break;
+                        default: return CR_INVALID;
+                    }
+                    code->addr  = 0;
+                    code->value = val1 & 0xFFU;
+                    return CR_OK;
+                default: return CR_INVALID;
             }
         }
     }
@@ -274,6 +284,14 @@ static inline int add_cwcheat_code(cheat_t *ch, cheat_code_t *code, uint32_t val
             break;
         case 8:
             code->op    = CO_MULWRITE2;
+            code->type  = CT_NONE;
+            code->addr  = val1 & 0x0FFFFFFFU;
+            code->value = val2;
+            code->extra = 1;
+            break;
+        case 5:
+            code->op    = CO_COPY;
+            code->type  = CT_NONE;
             code->addr  = val1 & 0x0FFFFFFFU;
             code->value = val2;
             code->extra = 1;
@@ -323,7 +341,7 @@ static inline int add_cwcheat_code(cheat_t *ch, cheat_code_t *code, uint32_t val
             break;
         case 0xB:
             code->op    = CO_DELAY;
-            code->type  = CT_I32;
+            code->type  = CT_NONE;
             code->extra = 0;
             code->addr  = 0;
             code->value = val2;
@@ -334,6 +352,100 @@ static inline int add_cwcheat_code(cheat_t *ch, cheat_code_t *code, uint32_t val
             code->extra = 0;
             code->addr  = val1 & 0x0FFFFFFFU;
             code->value = val2;
+            break;
+        case 0x0D:
+            switch (val2 >> 28) {
+                case 1:
+                case 3:
+                    code->op    = (val2 >> 28) == 1 ? CO_PRESSED : CO_NOTPRESSED;
+                    code->type  = CT_NONE;
+                    code->extra = 0;
+                    code->addr  = (val1 & 0xFFU) + 1;
+                    code->value = val2 & 0x0FFFFFFFU;
+                    break;
+                case 0:
+                case 2:
+                    switch ((val2 >> 20) & 0x0F) {
+                        case 0:
+                            code->op = CO_IFEQUAL;
+                            break;
+                        case 1:
+                            code->op = CO_IFNEQUAL;
+                            break;
+                        case 2:
+                            code->op = CO_IFLESS;
+                            break;
+                        case 3:
+                            code->op = CO_IFGREATER;
+                            break;
+                        default:
+                            return CR_INVALID;
+                    }
+                    code->extra = 0;
+                    code->addr = val1 & 0x0FFFFFFFU;
+                    if ((val2 >> 28) == 0) {
+                        code->type  = CT_I16;
+                        code->value = 0x10000 | (val2 & 0xFFFFU);
+                    } else {
+                        code->type = CT_I8;
+                        code->value = 0x10000 | (val2 & 0xFFU);
+                    }
+                    break;
+                case 4:
+                case 5:
+                case 6:
+                case 7:
+                    switch (val2 >> 28) {
+                        case 4:
+                            code->op = CO_IFEQUAL;
+                            break;
+                        case 5:
+                            code->op = CO_IFNEQUAL;
+                            break;
+                        case 6:
+                            code->op = CO_IFLESS;
+                            break;
+                        case 7:
+                            code->op = CO_IFGREATER;
+                            break;
+                    }
+                    code->type  = CT_I32;
+                    code->extra = 1;
+                    code->addr  = val1 & 0x0FFFFFFFU;
+                    code->value = val2 & 0x0FFFFFFFU;
+                    break;
+                default: return CR_INVALID;
+            }
+            break;
+        case 0x0E:
+            switch (val2 >> 28) {
+                case 0:
+                    code->op = CO_IFEQUAL;
+                    break;
+                case 1:
+                    code->op = CO_IFNEQUAL;
+                    break;
+                case 2:
+                    code->op = CO_IFLESS;
+                    break;
+                case 3:
+                    code->op = CO_IFGREATER;
+                    break;
+                default: return CR_INVALID;
+            }
+            switch((val1 >> 24) & 0x0F) {
+                case 0:
+                    code->type  = CT_I16;
+                    code->value = val1 & 0x00FFFFFFU;
+                    break;
+                case 1:
+                    code->type  = CT_I8;
+                    code->value = val1 & 0x00FF00FFU;
+                    break;
+                default: return CR_INVALID;
+            }
+            code->extra = 0;
+            code->addr  = val2 & 0x0FFFFFFFU;
             break;
         default: return CR_INVALID;
     }
@@ -365,9 +477,9 @@ int cheat_add(cheat_t *ch, const char *line) {
                     uint32_t val1, val2;
                     parse_values(line + 3, &val1, &val2);
                     int r = add_cwcheat_code(ch, &code, val1, val2);
-                    if (r == CR_MERGED) return CR_OK;
-                    if (r != CR_OK) return r;
                     code.status = ch->status;
+                    if (r == CR_MERGED) break;
+                    if (r != CR_OK) return r;
                     break;
                 }
             }
@@ -380,7 +492,7 @@ int cheat_add(cheat_t *ch, const char *line) {
         int cap = ch->capacity;
         if (ch->lines >= cap) {
             cap += CAPACITY_INCREMENT;
-            ch = (cheat_t*)ch->realloc_func(ch, sizeof(cheat_t) + cap * sizeof(cheat_code_t));
+            ch->codes = (cheat_code_t*)ch->realloc_func(ch->codes, cap * sizeof(cheat_code_t));
             ch->capacity = cap;
         }
     }
@@ -389,11 +501,242 @@ int cheat_add(cheat_t *ch, const char *line) {
     return code.extra ? CR_MORELINE : CR_OK;
 }
 
-void cheat_apply(cheat_t *ch) {
-
+static inline void _set_value(void *addr, uint8_t type, uint32_t value) {
+    switch(type) {
+        case CT_I8:
+            memcpy(addr, &value, 1);
+            break;
+        case CT_I16:
+            memcpy(addr, &value, 2);
+            break;
+        case CT_I32:
+            memcpy(addr, &value, 4);
+            break;
+    }
 }
 
-int cheat_get_codes(cheat_t *ch, cheat_code_t **codes) {
-    *codes = ch->codes;
-    return ch->lines;
+void cheat_apply(cheat_t *ch) {
+    int i;
+    int e = ch->lines;
+    for(i = 0; i < e; ++i) {
+        cheat_code_t *c = &ch->codes[i];
+        i += c->extra;
+
+#define REAL_ADDR(addr, oaddr) void *(addr) = ch->addr_cb ? ch->addr_cb((oaddr), 1) : (void*)(oaddr); if ((addr) == NULL) continue
+#define REAL_ADDR_RETURN(addr, oaddr) void *(addr) = ch->addr_cb ? ch->addr_cb((oaddr), 1) : (void*)(oaddr); if ((addr) == NULL) return
+#define UNREAL_ADDR(addr, raddr) void *(addr) = ch->addr_cb ? ch->addr_cb((raddr), 0) : (void*)(raddr); if ((addr) == NULL) continue
+        switch(c->op) {
+            case CO_WRITE: {
+                REAL_ADDR(addr, c->addr);
+                _set_value(addr, c->type, c->value);
+                break;
+            }
+            case CO_INCR: {
+                REAL_ADDR(addr, c->addr);
+                switch(c->type) {
+                case CT_I8:
+                    _set_value(addr, CT_I8, *(uint8_t*)addr + c->value);
+                    break;
+                case CT_I16:
+                    _set_value(addr, CT_I16, *(uint16_t*)addr + c->value);
+                    break;
+                case CT_I32:
+                    _set_value(addr, CT_I32, *(uint32_t*)addr + c->value);
+                    break;
+                }
+                break;
+            }
+            case CO_DECR: {
+                REAL_ADDR(addr, c->addr);
+                switch(c->type) {
+                case CT_I8:
+                    _set_value(addr, CT_I8, *(uint8_t*)addr - c->value);
+                    break;
+                case CT_I16:
+                    _set_value(addr, CT_I16, *(uint16_t*)addr - c->value);
+                    break;
+                case CT_I32:
+                    _set_value(addr, CT_I32, *(uint32_t*)addr - c->value);
+                    break;
+                }
+                break;
+            }
+            case CO_MULWRITE: {
+                if (i >= e) continue;
+                cheat_code_t *c2 = &ch->codes[i];
+                REAL_ADDR(addr, c->addr);
+                uint32_t *addr_s = (uint32_t*)addr;
+                uint32_t count = c->value >> 16;
+                uint32_t off = c->value & 0xFFFFU;
+                uint32_t value = c2->addr;
+                uint32_t incr = c2->value;
+                uint32_t i;
+                for (i = 0; i < count; ++i) {
+                    _set_value(addr_s, CT_I32, value);
+                    addr_s += off;
+                    value += incr;
+                }
+                break;
+            }
+            case CO_MULWRITE2: {
+                if (i >= e) continue;
+                cheat_code_t *c2 = &ch->codes[i];
+                REAL_ADDR(addr, c->addr);
+                uint32_t count = c->value >> 16;
+                uint32_t off = c->value & 0xFFFFU;
+                uint32_t value = c2->addr;
+                uint32_t incr = c2->value;
+                uint32_t i;
+                switch (c->type) {
+                    case CT_I8: {
+                        uint8_t *addr_s = (uint8_t*)addr;
+                        for (i = 0; i < count; ++i) {
+                            _set_value(addr_s, CT_I8, value);
+                            addr_s += off;
+                            value += incr;
+                        }
+                        break;
+                    }
+                    case CT_I16: {
+                        uint16_t *addr_s = (uint16_t*)addr;
+                        for (i = 0; i < count; ++i) {
+                            _set_value(addr_s, CT_I16, value);
+                            addr_s += off;
+                            value += incr;
+                        }
+                        break;
+                    }
+                }
+                break;
+            }
+            case CO_COPY: {
+                if (i >= e) continue;
+                cheat_code_t *c2 = &ch->codes[i];
+                REAL_ADDR(addr, c->addr);
+                REAL_ADDR(addr2, c2->addr);
+                memcpy(addr, addr2, c->value);
+                break;
+            }
+            case CO_PTRWRITE: {
+                if (i >= e) continue;
+                cheat_code_t *c2 = &ch->codes[i];
+                REAL_ADDR(addr, c->addr);
+                UNREAL_ADDR(addr2, *(uint32_t*)addr);
+                _set_value((uint8_t*)addr2 + c2->value, c->type, c->value);
+                break;
+            }
+            case CO_BITOR: {
+                REAL_ADDR(addr, c->addr);
+                switch (c->type) {
+                    case CT_I8:
+                        _set_value(addr, CT_I8, *(uint8_t*)addr | c->value);
+                        break;
+                    case CT_I16:
+                        _set_value(addr, CT_I16, *(uint16_t*)addr | c->value);
+                        break;
+                    case CT_I32:
+                        _set_value(addr, CT_I32, *(uint32_t*)addr | c->value);
+                        break;
+                }
+                break;
+            }
+            case CO_BITAND: {
+                REAL_ADDR(addr, c->addr);
+                switch (c->type) {
+                    case CT_I8:
+                        _set_value(addr, CT_I8, *(uint8_t*)addr & c->value);
+                        break;
+                    case CT_I16:
+                        _set_value(addr, CT_I16, *(uint16_t*)addr & c->value);
+                        break;
+                    case CT_I32:
+                        _set_value(addr, CT_I32, *(uint32_t*)addr & c->value);
+                        break;
+                }
+                break;
+            }
+            case CO_BITXOR: {
+                REAL_ADDR(addr, c->addr);
+                switch (c->type) {
+                    case CT_I8:
+                        _set_value(addr, CT_I8, *(uint8_t*)addr ^ c->value);
+                        break;
+                    case CT_I16:
+                        _set_value(addr, CT_I16, *(uint16_t*)addr ^ c->value);
+                        break;
+                    case CT_I32:
+                        _set_value(addr, CT_I32, *(uint32_t*)addr ^ c->value);
+                        break;
+                }
+                break;
+            }
+            case CO_DELAY: {
+                if (ch->delay_cb) ch->delay_cb(c->value);
+                break;
+            }
+            case CO_STOPPER: {
+                REAL_ADDR_RETURN(addr, c->addr);
+                if (*(uint32_t*)addr != c->value) i = e;
+                break;
+            }
+            case CO_PRESSED: {
+                if (!ch->input_cb || !ch->input_cb(c->value))
+                    i += c->addr;
+                break;
+            }
+            case CO_NOTPRESSED: {
+                if (!ch->input_cb || ch->input_cb(c->value))
+                    i += c->addr;
+                break;
+            }
+            case CO_IFEQUAL:
+            case CO_IFNEQUAL:
+            case CO_IFLESS:
+            case CO_IFGREATER: {
+                uint32_t skip;
+                uint32_t value;
+                uint32_t cvalue;
+                REAL_ADDR_RETURN(addr, c->addr);
+                if (c->extra) {
+                    if (i >= e) continue;
+                    cheat_code_t *c2 = &ch->codes[i];
+                    skip = c2->value;
+                    value = c->value;
+                } else {
+                    skip = c->value >> 16;
+                    value = c->value & 0xFFFFU;
+                }
+                switch(c->type) {
+                    case CT_I8:
+                        cvalue = *(uint8_t*)addr;
+                        break;
+                    case CT_I16:
+                        cvalue = *(uint16_t*)addr;
+                        break;
+                    case CT_I32:
+                        cvalue = *(uint32_t*)addr;
+                        break;
+                }
+                switch(c->op) {
+                    case CO_IFEQUAL:
+                        if (cvalue != value) i += skip;
+                        break;
+                    case CO_IFNEQUAL:
+                        if (cvalue == value) i += skip;
+                        break;
+                    case CO_IFLESS:
+                        if (cvalue >= value) i += skip;
+                        break;
+                    case CO_IFGREATER:
+                        if (cvalue <= value) i += skip;
+                        break;
+                }
+                break;
+            }
+            default: continue;
+        }
+#undef REAL_ADDR_RETURN
+#undef REAL_ADDR
+#undef UNREAL_ADDR
+    }
 }
