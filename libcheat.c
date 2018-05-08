@@ -640,11 +640,10 @@ void cheat_apply(cheat_t *ch) {
                         break;
                     }
                     case CT_I16: {
-                        off *= 2;
                         uint16_t *addr_s = (uint16_t*)addr;
                         for (i = 0; i < count; ++i) {
-                            ch->write_cb(addr, &value, 2, 1);
-                            addr += off;
+                            ch->write_cb((uint32_t)addr_s, &value, 2, 1);
+                            addr_s += off;
                             value += incr;
                         }
                         break;
