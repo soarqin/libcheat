@@ -42,6 +42,14 @@ enum {
     CT_I32 = 4,
 };
 
+// Cheat section struct
+typedef struct cheat_section_t {
+    uint8_t  index;      // section index
+    uint8_t  enabled;    // enabled
+    uint16_t code_index; // index in codes array
+    char name[28];       // section name with maximum of 27 chars, exceeded characters will be truncated
+} cheat_section_t;
+
 // Cheat code struct
 typedef struct cheat_code_t {
     uint8_t  op;      // operation
@@ -56,10 +64,12 @@ typedef struct cheat_code_t {
 enum {
     CR_OK = 0,
     // for cheat_add
-    CR_INVALID = -1,
-    CR_MORELINE = -100,
+    CR_INVALID      = -1,    // invalid code
+    CR_TOOMANYCODES = -2,    // codes count exceeded
+    CR_TOOMANYSECS  = -3,    // sections count exceeded
+    CR_MORELINE     = -100,  // need more lines as a complete cheat set
     // for cheat_apply
-    CR_STOPPER = -2,
+    CR_STOPPER      = -11,   // stopped by code stopper
 };
 
 typedef int   (*cheat_read_cb_t)(uint32_t addr, void *data, int len, int need_conv);
@@ -86,7 +96,9 @@ void        cheat_finish(cheat_t *ch);
 uint8_t     cheat_get_type(cheat_t *ch);
 const char *cheat_get_titleid(cheat_t *ch);
 void        cheat_reset(cheat_t *ch);
-int         cheat_get_codes(cheat_t *ch, cheat_code_t **codes);
+int         cheat_get_codes(cheat_t *ch, const cheat_code_t **codes);
+int         cheat_get_sections(cheat_t *ch, const cheat_section_t **sections);
+int         cheat_section_toggle(cheat_t *ch, uint16_t index, int enabled);
 int         cheat_add(cheat_t *ch, const char *line);
 void        cheat_apply(cheat_t *ch);
 

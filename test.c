@@ -67,12 +67,18 @@ static void delay_cb(uint32_t millisec) {
 }
 
 void dump_codes(cheat_t *ch) {
-    cheat_code_t *codes;
+    const cheat_code_t *codes;
+    const cheat_section_t *sections;
     int i, count;
     printf("%s %d\n", cheat_get_titleid(ch), cheat_get_type(ch));
+    count = cheat_get_sections(ch, &sections);
+    for (i = 0; i < count; ++i) {
+        const cheat_section_t *s = &sections[i];
+        printf("  %c %2d %4d %s\n", s->enabled ? 'o' : 'x', s->index, s->code_index, s->name);
+    }
     count = cheat_get_codes(ch, &codes);
     for (i = 0; i < count; ++i) {
-        cheat_code_t *c = &codes[i];
+        const cheat_code_t *c = &codes[i];
         printf("  %c%c %2d %2d %08X %08X\n", c->status ? 'o' : 'x', c->extra ? '+' : ' ', c->op, c->type, c->addr, c->value);
     }
 }
@@ -87,7 +93,7 @@ int main() {
     cheat_set_delay_cb(ch, delay_cb);
     cheat_add(ch, "_S PCSH10003");
     cheat_add(ch, "_G Dynasty Warriors NEXT");
-    cheat_add(ch, "_C1");
+    cheat_add(ch, "_C1 Section1");
 
     cheat_add(ch, "_L 0x30100012 0x01234567");
     cheat_add(ch, "_L 0x30200012 0x01234567");
@@ -106,6 +112,7 @@ int main() {
     cheat_add(ch, "_L 0x81234567 0x00040020");
     cheat_add(ch, "_L 0x12345678 0x00000008");
 
+    cheat_add(ch, "_C1 Section2");
     cheat_add(ch, "_L 0x61000000 0x12345678");
     cheat_add(ch, "_L 0x00000001 0x00000004");
     cheat_add(ch, "_L 0x61000000 0x12345678");
@@ -208,6 +215,7 @@ int main() {
 
     printf("First pass\n");
     cheat_apply(ch);
+    cheat_section_toggle(ch, 1, 0);
     printf("Second pass\n");
     cheat_apply(ch);
 

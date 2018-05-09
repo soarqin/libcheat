@@ -3,8 +3,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define CAPACITY_INIT      (32)
-#define CAPACITY_INCREMENT (32)
+#define CODES_CAP_INIT      (32)
+#define CODES_CAP_INCREMENT (32)
+#define CODES_MAX           (4000)
+#define SECTIONS_CAP_INIT      (8)
+#define SECTIONS_CAP_INCREMENT (8)
+#define SECTIONS_MAX           (240)
 
 // for internal use
 enum {
@@ -28,12 +32,18 @@ typedef struct cheat_t {
     uint8_t           status;
     // game title id
     char              titleid[16];
-    // valid code lines
-    int               lines;
-    // array capacity
-    int               capacity;
+    // count of valid codes
+    uint16_t          codes_count;
+    // codes array capacity
+    uint16_t          codes_cap;
     // cheat codes
     cheat_code_t      *codes;
+    // count of code sections
+    uint8_t          sections_count;
+    // sections array capacity
+    uint8_t          sections_cap;
+    // sections array
+    cheat_section_t   *sections;
 } cheat_t;
 
 int default_read_cb(uint32_t addr, void *data, int len, int need_conv) {
@@ -66,7 +76,8 @@ cheat_t *cheat_new(uint8_t type) {
 cheat_t *cheat_new2(uint8_t type, cheat_realloc_t r, cheat_free_t f) {
     cheat_t *ch = (cheat_t*)r(NULL, sizeof(cheat_t));
     if (ch == NULL) return NULL;
-    ch->codes = (cheat_code_t*)r(NULL, CAPACITY_INIT * sizeof(cheat_code_t));
+    ch->codes = (cheat_code_t*)r(NULL, CODES_CAP_INIT * sizeof(cheat_code_t));
+    ch->sections = (cheat_section_t*)r(NULL, SECTIONS_CAP_INIT * sizeof(cheat_section_t));
 
     ch->read_cb  = default_read_cb;
     ch->write_cb = default_write_cb;
@@ -76,14 +87,17 @@ cheat_t *cheat_new2(uint8_t type, cheat_realloc_t r, cheat_free_t f) {
     ch->delay_cb = default_delay_cb;
 
     ch->realloc_func = r;
-    ch->free_func = f;
+    ch->free_func    = f;
 
     ch->type = type;
 
     ch->titleid[0] = 0;
-    ch->lines = 0;
 
-    ch->capacity = CAPACITY_INIT;
+    ch->codes_count = 0;
+    ch->codes_cap   = CODES_CAP_INIT;
+
+    ch->sections_count = 0;
+    ch->sections_cap   = SECTIONS_CAP_INIT;
     return ch;
 }
 
@@ -130,7 +144,7 @@ void cheat_set_delay_cb(cheat_t *ch, cheat_delay_cb_t cb) {
 }
 
 void cheat_finish(cheat_t *ch) {
-    ch->lines = 0;
+    ch->codes_count = 0;
     ch->free_func(ch->codes);
     ch->free_func(ch);
 }
@@ -146,16 +160,41 @@ const char *cheat_get_titleid(cheat_t *ch) {
 void cheat_reset(cheat_t *ch) {
     ch->type = CH_UNKNOWN;
     ch->titleid[0] = 0;
-    ch->lines = 0;
-    if (ch->capacity > CAPACITY_INIT) {
-        ch->codes = (cheat_code_t*)ch->realloc_func(ch->codes, CAPACITY_INIT * sizeof(cheat_code_t));
-        ch->capacity = CAPACITY_INIT;
+    ch->codes_count = 0;
+    if (ch->codes_cap > CODES_CAP_INIT) {
+        ch->codes = (cheat_code_t*)ch->realloc_func(ch->codes, CODES_CAP_INIT * sizeof(cheat_code_t));
+        ch->codes_cap = CODES_CAP_INIT;
+    }
+
+    ch->sections_count = 0;
+    if (ch->sections_cap > SECTIONS_CAP_INIT) {
+        ch->sections = (cheat_section_t*)ch->realloc_func(ch->sections, SECTIONS_CAP_INIT * sizeof(cheat_section_t));
+        ch->sections_cap = SECTIONS_CAP_INIT;
     }
 }
 
-int cheat_get_codes(cheat_t *ch, cheat_code_t **codes) {
+int cheat_get_codes(cheat_t *ch, const cheat_code_t **codes) {
     *codes = ch->codes;
-    return ch->lines;
+    return ch->codes_count;
+}
+
+int cheat_get_sections(cheat_t *ch, const cheat_section_t **sections) {
+    *sections = ch->sections;
+    return ch->sections_count;
+}
+
+int cheat_section_toggle(cheat_t *ch, uint16_t index, int enabled) {
+    cheat_section_t *sec;
+    uint16_t cur, end;
+    if (index >= ch->sections_count) return CR_INVALID;
+    sec = &ch->sections[index];
+    if (sec->enabled == enabled) return CR_OK;
+    sec->enabled = enabled;
+    cur = sec->code_index;
+    end = index + 1 < ch->sections_count ? ch->sections[index + 1].code_index : ch->codes_count;
+    for (; cur < end; ++cur) {
+        ch->codes[cur].status = enabled;
+    }
 }
 
 static inline uint32_t get_code_value(const char *s) {
@@ -173,8 +212,8 @@ static inline void parse_values(const char *s, uint32_t *val1, uint32_t *val2) {
 }
 
 static inline int add_cwcheat_code(cheat_t *ch, cheat_code_t *code, uint32_t val1, uint32_t val2) {
-    if (ch->lines > 0) {
-        cheat_code_t *last = &ch->codes[ch->lines - 1];
+    if (ch->codes_count > 0) {
+        cheat_code_t *last = &ch->codes[ch->codes_count - 1];
         if (last->extra > 0) {
             code->op     = CO_DATA;
             code->status = last->status;
@@ -519,6 +558,9 @@ static inline int add_cwcheat_code(cheat_t *ch, cheat_code_t *code, uint32_t val
 int cheat_add(cheat_t *ch, const char *line) {
     cheat_code_t code;
 
+    if (ch->codes_count >= CODES_MAX) return -1;
+    if (line[0] == 0 || line[1] == 0 || line[2] == 0) return -1;
+
     switch(ch->type) {
         case CH_CWCHEAT: {
             // parse the cheat code
@@ -526,52 +568,86 @@ int cheat_add(cheat_t *ch, const char *line) {
             if (line[0] != '_') return CR_INVALID;
 
             switch (line[1]) {
+                // Comment
+                case '#':
+                    return CR_OK;
+
+                // Game TITLEID
                 case 'S':
-                    line += 3;
+                    line += 2;
                     while (*line == ' ' || *line == '\t') ++line;
                     strncpy(ch->titleid, line, 15);
                     ch->titleid[15] = 0;
                     return CR_OK;
+
+                // Game name/description, ignored here
                 case 'G':
                     return CR_OK;
-                case 'C':
+
+                // Cheat section
+                case 'C': {
+                    cheat_section_t *sec;
                     ch->status = (line[2] > '0' && line[2] <= '9') ? 1 : 0;
+                    line += 2;
+                    while (*line == ' ' || *line == '\t') ++line;
+                    // check capacity
+                    {
+                        int cap = ch->sections_cap;
+                        if (ch->sections_count >= cap) {
+                            cap += SECTIONS_CAP_INCREMENT;
+                            ch->sections = (cheat_section_t*)ch->realloc_func(ch->sections, cap * sizeof(cheat_section_t));
+                            ch->sections_cap = cap;
+                        }
+                    }
+                    // add section
+                    sec = &ch->sections[ch->sections_count++];
+                    sec->index = ch->sections_count;
+                    sec->enabled = ch->status;
+                    sec->code_index = ch->codes_count;
+                    strncpy(sec->name, line, 27);
+                    sec->name[27] = 0;
                     return CR_OK;
+                }
+
+                // Cheat line
                 case 'L': {
                     uint32_t val1, val2;
                     parse_values(line + 3, &val1, &val2);
                     int r = add_cwcheat_code(ch, &code, val1, val2);
                     code.status = ch->status;
-                    if (r == CR_MERGED) break;
-                    if (r != CR_OK) return r;
-                    break;
+                    if (r != CR_MERGED && r != CR_OK) return r;
+                    // check capacity
+                    {
+                        int cap = ch->codes_cap;
+                        if (ch->codes_count >= cap) {
+                            cap += CODES_CAP_INCREMENT;
+                            ch->codes = (cheat_code_t*)ch->realloc_func(ch->codes, cap * sizeof(cheat_code_t));
+                            ch->codes_cap = cap;
+                        }
+                    }
+                    // add code
+                    ch->codes[ch->codes_count++] = code;
+                    return code.extra ? CR_MORELINE : CR_OK;
+                default:
+                    return -1;
                 }
             }
             break;
+        default:
+            return -1;
         }
     }
-
-    // check for capacity
-    {
-        int cap = ch->capacity;
-        if (ch->lines >= cap) {
-            cap += CAPACITY_INCREMENT;
-            ch->codes = (cheat_code_t*)ch->realloc_func(ch->codes, cap * sizeof(cheat_code_t));
-            ch->capacity = cap;
-        }
-    }
-    // add code
-    ch->codes[ch->lines++] = code;
-    return code.extra ? CR_MORELINE : CR_OK;
 }
 
 void cheat_apply(cheat_t *ch) {
     int i;
-    int e = ch->lines;
+    int e = ch->codes_count;
     for(i = 0; i < e; ++i) {
         cheat_code_t *c = &ch->codes[i];
-        i += c->extra;
-
+        if (!c->status) {
+            i += c->extra;
+            continue;
+        }
         switch(c->op) {
             case CO_WRITE: {
                 ch->write_cb(c->addr, &c->value, c->type, 1);
@@ -606,8 +682,8 @@ void cheat_apply(cheat_t *ch) {
                 break;
             }
             case CO_MULWRITE: {
-                if (i >= e) continue;
-                cheat_code_t *c2 = &ch->codes[i];
+                if (i + 1 >= e) break;
+                cheat_code_t *c2 = &ch->codes[i + 1];
                 uint32_t addr_s = c->addr;
                 uint32_t count = c->value >> 16;
                 uint32_t off = (c->value & 0xFFFFU) * 4;
@@ -622,8 +698,8 @@ void cheat_apply(cheat_t *ch) {
                 break;
             }
             case CO_MULWRITE2: {
-                if (i >= e) continue;
-                cheat_code_t *c2 = &ch->codes[i];
+                if (i + 1 >= e) break;
+                cheat_code_t *c2 = &ch->codes[i + 1];
                 uint32_t count = c->value >> 16;
                 uint32_t addr = c->addr;
                 uint32_t off = c->value & 0xFFFFU;
@@ -653,16 +729,16 @@ void cheat_apply(cheat_t *ch) {
             }
             case CO_COPY: {
                 cheat_code_t *c2;
-                if (i >= e) continue;
-                c2 = &ch->codes[i];
+                if (i + 1 >= e) break;
+                c2 = &ch->codes[i + 1];
                 ch->copy_cb(c->addr, c2->addr, c->value, 1);
                 break;
             }
             case CO_PTRWRITE: {
-                if (i >= e) continue;
-                cheat_code_t *c2 = &ch->codes[i];
+                if (i + 1 >= e) break;
+                cheat_code_t *c2 = &ch->codes[i + 1];
                 uint32_t addr2;
-                if (ch->read_cb(c->addr, &addr2, 4, 1) < 0) continue;
+                if (ch->read_cb(c->addr, &addr2, 4, 1) < 0) break;
                 ch->write_cb(addr2 + c2->value, &c->value, c->type, 0);
                 break;
             }
@@ -714,7 +790,7 @@ void cheat_apply(cheat_t *ch) {
             }
             case CO_STOPPER: {
                 uint32_t val;
-                if (ch->read_cb(c->addr, &val, 4, 1) < 0) continue;
+                if (ch->read_cb(c->addr, &val, 4, 1) < 0) break;
                 if (val != c->value) i = e;
                 break;
             }
@@ -736,8 +812,8 @@ void cheat_apply(cheat_t *ch) {
                 uint32_t value;
                 uint32_t cvalue;
                 if (c->extra) {
-                    if (i >= e) continue;
-                    cheat_code_t *c2 = &ch->codes[i];
+                    if (i + 1 >= e) break;
+                    cheat_code_t *c2 = &ch->codes[i + 1];
                     skip = c2->value;
                     value = c->value;
                 } else {
@@ -746,13 +822,13 @@ void cheat_apply(cheat_t *ch) {
                 }
                 switch(c->type) {
                     case CT_I8:
-                        if (ch->read_cb(c->addr, &cvalue, 1, 1) < 0) continue;
+                        if (ch->read_cb(c->addr, &cvalue, 1, 1) < 0) break;
                         break;
                     case CT_I16:
-                        if (ch->read_cb(c->addr, &cvalue, 2, 1) < 0) continue;
+                        if (ch->read_cb(c->addr, &cvalue, 2, 1) < 0) break;
                         break;
                     case CT_I32:
-                        if (ch->read_cb(c->addr, &cvalue, 4, 1) < 0) continue;
+                        if (ch->read_cb(c->addr, &cvalue, 4, 1) < 0) break;
                         break;
                 }
                 switch(c->op) {
@@ -771,10 +847,8 @@ void cheat_apply(cheat_t *ch) {
                 }
                 break;
             }
-            default: continue;
+            default: break;
         }
-#undef REAL_ADDR_RETURN
-#undef REAL_ADDR
-#undef UNREAL_ADDR
+        i += c->extra;
     }
 }
