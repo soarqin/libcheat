@@ -588,7 +588,7 @@ int cheat_add(cheat_t *ch, const char *line) {
                 case 'C': {
                     cheat_section_t *sec;
                     ch->status = (line[2] > '0' && line[2] <= '9') ? 1 : 0;
-                    line += 2;
+                    line += 3;
                     while (*line == ' ' || *line == '\t') ++line;
                     // check capacity
                     {
