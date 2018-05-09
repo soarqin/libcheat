@@ -195,6 +195,7 @@ int cheat_section_toggle(cheat_t *ch, uint16_t index, int enabled) {
     for (; cur < end; ++cur) {
         ch->codes[cur].status = enabled;
     }
+    return CR_OK;
 }
 
 static inline uint32_t get_code_value(const char *s) {
