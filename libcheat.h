@@ -31,7 +31,9 @@ enum {
     CO_IFNEQUAL,
     CO_IFLESS,
     CO_IFGREATER,
-    CO_DATA, // used as data for multi-line cheat
+    CO_DATA,      // used as data for multi-line cheat
+    CO_EXTENSION, // opcode above this is extension codes registered by cheat_ext_cb_t,
+                  // they are running through cheat_ext_call_cb_t,
 };
 
 enum {
@@ -79,27 +81,37 @@ typedef int   (*cheat_trans_cb_t)(uint32_t addr, uint32_t value, int len, int op
 typedef int   (*cheat_copy_cb_t)(uint32_t toaddr, uint32_t fromaddr, int len, int need_conv);
 typedef int   (*cheat_button_cb_t)(uint32_t buttons);
 typedef void  (*cheat_delay_cb_t)(uint32_t millisec);
+// return CR_OK to add code to list
+typedef int   (*cheat_ext_cb_t)(cheat_code_t *code, char op, const char *data);
+// return CR_STOPPER to stop code running
+typedef int   (*cheat_ext_call_cb_t)(int line, cheat_code_t *code);
 typedef void  *(*cheat_realloc_t)(void *ptr, size_t size);
 typedef void  (*cheat_free_t)(void *ptr);
 
 typedef struct cheat_t cheat_t;
 
-cheat_t *   cheat_new(uint8_t type);
-cheat_t *   cheat_new2(uint8_t type, cheat_realloc_t r, cheat_free_t f);
-void        cheat_set_read_cb(cheat_t *ch, cheat_read_cb_t cb);
-void        cheat_set_write_cb(cheat_t *ch, cheat_write_cb_t cb);
-void        cheat_set_trans_cb(cheat_t *ch, cheat_trans_cb_t cb);
-void        cheat_set_copy_cb(cheat_t *ch, cheat_copy_cb_t cb);
-void        cheat_set_button_cb(cheat_t *ch, cheat_button_cb_t cb);
-void        cheat_set_delay_cb(cheat_t *ch, cheat_delay_cb_t cb);
-void        cheat_finish(cheat_t *ch);
-uint8_t     cheat_get_type(cheat_t *ch);
-const char *cheat_get_titleid(cheat_t *ch);
-void        cheat_reset(cheat_t *ch);
-int         cheat_get_codes(cheat_t *ch, const cheat_code_t **codes);
-int         cheat_get_sections(cheat_t *ch, const cheat_section_t **sections);
-int         cheat_section_toggle(cheat_t *ch, uint16_t index, int enabled);
-int         cheat_add(cheat_t *ch, const char *line);
-void        cheat_apply(cheat_t *ch);
+cheat_t *        cheat_new(uint8_t type);
+cheat_t *        cheat_new2(uint8_t type, cheat_realloc_t r, cheat_free_t f);
+void             cheat_set_read_cb(cheat_t *ch, cheat_read_cb_t cb);
+void             cheat_set_write_cb(cheat_t *ch, cheat_write_cb_t cb);
+void             cheat_set_trans_cb(cheat_t *ch, cheat_trans_cb_t cb);
+void             cheat_set_copy_cb(cheat_t *ch, cheat_copy_cb_t cb);
+void             cheat_set_button_cb(cheat_t *ch, cheat_button_cb_t cb);
+void             cheat_set_delay_cb(cheat_t *ch, cheat_delay_cb_t cb);
+void             cheat_set_ext_cb(cheat_t *ch, cheat_ext_cb_t cb);
+void             cheat_set_ext_call_cb(cheat_t *ch, cheat_ext_call_cb_t cb);
+void             cheat_finish(cheat_t *ch);
+uint8_t          cheat_get_type(cheat_t *ch);
+const char *     cheat_get_titleid(cheat_t *ch);
+void             cheat_reset(cheat_t *ch);
+int              cheat_get_codes(cheat_t *ch, const cheat_code_t **codes);
+int              cheat_get_code_count(cheat_t *ch);
+cheat_code_t *   cheat_get_code(cheat_t *ch, int index);
+int              cheat_get_sections(cheat_t *ch, const cheat_section_t **sections);
+int              cheat_get_section_count(cheat_t *ch);
+cheat_section_t *cheat_get_section(cheat_t *ch, int index);
+int              cheat_section_toggle(cheat_t *ch, uint16_t index, int enabled);
+int              cheat_add(cheat_t *ch, const char *line);
+int              cheat_apply(cheat_t *ch);
 
 #endif // __LIBCHEAT_H_

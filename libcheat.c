@@ -17,33 +17,39 @@ enum {
 
 typedef struct cheat_t {
     // Callback functions
-    cheat_read_cb_t   read_cb;
-    cheat_write_cb_t  write_cb;
-    cheat_copy_cb_t   copy_cb;
-    cheat_trans_cb_t  trans_cb;
-    cheat_button_cb_t input_cb;
-    cheat_delay_cb_t  delay_cb;
+    cheat_read_cb_t     read_cb;
+    cheat_write_cb_t    write_cb;
+    cheat_copy_cb_t     copy_cb;
+    cheat_trans_cb_t    trans_cb;
+    cheat_button_cb_t   input_cb;
+    cheat_delay_cb_t    delay_cb;
+    cheat_ext_cb_t      ext_cb;
+    cheat_ext_call_cb_t ext_call_cb;
+
     // allocator functions
-    cheat_realloc_t   realloc_func;
-    cheat_free_t      free_func;
+    cheat_realloc_t realloc_func;
+    cheat_free_t    free_func;
+
     // code type
-    uint8_t           type;
+    uint8_t type;
     // status 1-enable by default
-    uint8_t           status;
+    uint8_t status;
     // game title id
-    char              titleid[16];
+    char    titleid[16];
+
     // count of valid codes
-    uint16_t          codes_count;
+    uint16_t     codes_count;
     // codes array capacity
-    uint16_t          codes_cap;
+    uint16_t     codes_cap;
     // cheat codes
-    cheat_code_t      *codes;
+    cheat_code_t *codes;
+
     // count of code sections
-    uint8_t          sections_count;
+    uint8_t         sections_count;
     // sections array capacity
-    uint8_t          sections_cap;
+    uint8_t         sections_cap;
     // sections array
-    cheat_section_t   *sections;
+    cheat_section_t *sections;
 } cheat_t;
 
 int default_read_cb(uint32_t addr, void *data, int len, int need_conv) {
@@ -69,6 +75,14 @@ int default_button_cb(uint32_t buttons) {
 void default_delay_cb(uint32_t millisec) {
 }
 
+int default_ext_cb(cheat_code_t *code, char op, const char *data) {
+    return CR_INVALID;
+}
+
+int default_ext_call_cb(int line, cheat_code_t *code) {
+    return CR_INVALID;
+}
+
 cheat_t *cheat_new(uint8_t type) {
     return cheat_new2(type, realloc, free);
 }
@@ -85,6 +99,7 @@ cheat_t *cheat_new2(uint8_t type, cheat_realloc_t r, cheat_free_t f) {
     ch->copy_cb  = default_copy_cb;
     ch->input_cb = default_button_cb;
     ch->delay_cb = default_delay_cb;
+    ch->ext_cb   = default_ext_cb;
 
     ch->realloc_func = r;
     ch->free_func    = f;
@@ -143,6 +158,20 @@ void cheat_set_delay_cb(cheat_t *ch, cheat_delay_cb_t cb) {
         ch->delay_cb = cb;
 }
 
+void cheat_set_ext_cb(cheat_t *ch, cheat_ext_cb_t cb) {
+    if (cb == NULL)
+        ch->ext_cb = default_ext_cb;
+    else
+        ch->ext_cb = cb;
+}
+
+void cheat_set_ext_call_cb(cheat_t *ch, cheat_ext_call_cb_t cb) {
+    if (cb == NULL)
+        ch->ext_call_cb = default_ext_call_cb;
+    else
+        ch->ext_call_cb = cb;
+}
+
 void cheat_finish(cheat_t *ch) {
     ch->codes_count = 0;
     ch->free_func(ch->codes);
@@ -178,9 +207,25 @@ int cheat_get_codes(cheat_t *ch, const cheat_code_t **codes) {
     return ch->codes_count;
 }
 
+int cheat_get_code_count(cheat_t *ch) {
+    return ch->codes_count;
+}
+
+cheat_code_t *cheat_get_code(cheat_t *ch, int index) {
+    return index < ch->codes_count ? &ch->codes[index] : NULL;
+}
+
 int cheat_get_sections(cheat_t *ch, const cheat_section_t **sections) {
     *sections = ch->sections;
     return ch->sections_count;
+}
+
+int cheat_get_section_count(cheat_t *ch) {
+    return ch->sections_count;
+}
+
+cheat_section_t *cheat_get_section(cheat_t *ch, int index) {
+    return index < ch->sections_count ? &ch->sections[index] : NULL;
 }
 
 int cheat_section_toggle(cheat_t *ch, uint16_t index, int enabled) {
@@ -564,11 +609,13 @@ int cheat_add(cheat_t *ch, const char *line) {
 
     switch(ch->type) {
         case CH_CWCHEAT: {
+            char op;
             // parse the cheat code
             if (line[0] == 0) return CR_OK;
             if (line[0] != '_') return CR_INVALID;
+            op = line[1];
 
-            switch (line[1]) {
+            switch (op) {
                 // Comment
                 case '#':
                     return CR_OK;
@@ -630,17 +677,24 @@ int cheat_add(cheat_t *ch, const char *line) {
                     ch->codes[ch->codes_count++] = code;
                     return code.extra ? CR_MORELINE : CR_OK;
                 default:
-                    return -1;
+                    line += 2;
+                    while (*line == ' ' || *line == '\t') ++line;
+                    if (ch->ext_cb(&code, op, line) == CR_OK) {
+                        ch->codes[ch->codes_count++] = code;
+                        return CR_OK;
+                    }
+                    return CR_INVALID;
                 }
             }
             break;
         default:
-            return -1;
+            return CR_INVALID;
         }
     }
 }
 
-void cheat_apply(cheat_t *ch) {
+int cheat_apply(cheat_t *ch) {
+    int ret = CR_OK;
     int i;
     int e = ch->codes_count;
     for(i = 0; i < e; ++i) {
@@ -792,8 +846,11 @@ void cheat_apply(cheat_t *ch) {
             case CO_STOPPER: {
                 uint32_t val;
                 if (ch->read_cb(c->addr, &val, 4, 1) < 0) break;
-                if (val != c->value) i = e;
-                break;
+                if (val != c->value) {
+                    i = e;
+                    ret = CR_STOPPER;
+                }
+                continue;
             }
             case CO_PRESSED: {
                 if (!ch->input_cb(c->value))
@@ -848,8 +905,15 @@ void cheat_apply(cheat_t *ch) {
                 }
                 break;
             }
-            default: break;
+            default:
+                if (ch->ext_call_cb(i, c) == CR_STOPPER) {
+                    i = e;
+                    ret = CR_STOPPER;
+                    continue;
+                }
+                break;
         }
         i += c->extra;
     }
+    return ret;
 }
