@@ -75,7 +75,7 @@ int default_button_cb(uint32_t buttons) {
 void default_delay_cb(uint32_t millisec) {
 }
 
-int default_ext_cb(cheat_code_t *code, char op, const char *data) {
+int default_ext_cb(cheat_code_t *code, const char *op, uint32_t val1, uint32_t val2) {
     return CR_INVALID;
 }
 
@@ -660,8 +660,10 @@ int cheat_add(cheat_t *ch, const char *line) {
                 // Cheat line
                 case 'L': {
                     uint32_t val1, val2;
-                    parse_values(line + 3, &val1, &val2);
-                    int r = add_cwcheat_code(ch, &code, val1, val2);
+                    int r;
+                    line += 2;
+                    parse_values(line, &val1, &val2);
+                    r = add_cwcheat_code(ch, &code, val1, val2);
                     code.status = ch->status;
                     if (r != CR_MERGED && r != CR_OK) return r;
                     // check capacity
@@ -676,10 +678,21 @@ int cheat_add(cheat_t *ch, const char *line) {
                     // add code
                     ch->codes[ch->codes_count++] = code;
                     return code.extra ? CR_MORELINE : CR_OK;
-                default:
+                }
+                default: {
+                    const char *s;
+                    uint32_t val1, val2;
+                    int len;
+                    char ctlcode[16];
+                    s = line + 1;
                     line += 2;
-                    while (*line == ' ' || *line == '\t') ++line;
-                    if (ch->ext_cb(&code, op, line) == CR_OK) {
+                    while (*line != 0 && *line != ' ' && *line != '\t') ++line;
+                    len = line - s;
+                    if (len > 15) len = 15;
+                    if (len > 0) strncpy(ctlcode, s, len);
+                    ctlcode[len] = 0;
+                    parse_values(line, &val1, &val2);
+                    if (ch->ext_cb(&code, ctlcode, val1, val2) == CR_OK) {
                         code.status = ch->status;
                         ch->codes[ch->codes_count++] = code;
                         return CR_OK;

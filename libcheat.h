@@ -82,7 +82,7 @@ typedef int   (*cheat_copy_cb_t)(uint32_t toaddr, uint32_t fromaddr, int len, in
 typedef int   (*cheat_button_cb_t)(uint32_t buttons);
 typedef void  (*cheat_delay_cb_t)(uint32_t millisec);
 // return CR_OK to add code to list
-typedef int   (*cheat_ext_cb_t)(cheat_code_t *code, char op, const char *data);
+typedef int   (*cheat_ext_cb_t)(cheat_code_t *code, const char *op, uint32_t val1, uint32_t val2);
 // return CR_STOPPER to stop code running
 typedef int   (*cheat_ext_call_cb_t)(int line, cheat_code_t *code);
 typedef void  *(*cheat_realloc_t)(void *ptr, size_t size);
