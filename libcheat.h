@@ -74,24 +74,24 @@ enum {
     CR_STOPPER      = -11,   // stopped by code stopper
 };
 
-typedef int   (*cheat_read_cb_t)(uint32_t addr, void *data, int len, int need_conv);
-typedef int   (*cheat_write_cb_t)(uint32_t addr, const void *data, int len, int need_conv);
+typedef int   (*cheat_read_cb_t)(void *arg, uint32_t addr, void *data, int len, int need_conv);
+typedef int   (*cheat_write_cb_t)(void *arg, uint32_t addr, const void *data, int len, int need_conv);
 // transform data, 0-INCR 1-DECR 2-OR 3-AND 4-XOR
-typedef int   (*cheat_trans_cb_t)(uint32_t addr, uint32_t value, int len, int op, int need_conv);
-typedef int   (*cheat_copy_cb_t)(uint32_t toaddr, uint32_t fromaddr, int len, int need_conv);
-typedef int   (*cheat_button_cb_t)(uint32_t buttons);
-typedef void  (*cheat_delay_cb_t)(uint32_t millisec);
+typedef int   (*cheat_trans_cb_t)(void *arg, uint32_t addr, uint32_t value, int len, int op, int need_conv);
+typedef int   (*cheat_copy_cb_t)(void *arg, uint32_t toaddr, uint32_t fromaddr, int len, int need_conv);
+typedef int   (*cheat_button_cb_t)(void *arg, uint32_t buttons);
+typedef void  (*cheat_delay_cb_t)(void *arg, uint32_t millisec);
 // return CR_OK to add code to list
-typedef int   (*cheat_ext_cb_t)(cheat_code_t *code, const char *op, uint32_t val1, uint32_t val2);
+typedef int   (*cheat_ext_cb_t)(void *arg, cheat_code_t *code, const char *op, uint32_t val1, uint32_t val2);
 // return CR_STOPPER to stop code running
-typedef int   (*cheat_ext_call_cb_t)(int line, const cheat_code_t *code);
+typedef int   (*cheat_ext_call_cb_t)(void *arg, int line, const cheat_code_t *code);
 typedef void  *(*cheat_realloc_t)(void *ptr, size_t size);
 typedef void  (*cheat_free_t)(void *ptr);
 
 typedef struct cheat_t cheat_t;
 
-cheat_t *        cheat_new(uint8_t type);
-cheat_t *        cheat_new2(uint8_t type, cheat_realloc_t r, cheat_free_t f);
+cheat_t *        cheat_new(uint8_t type, void *arg);
+cheat_t *        cheat_new2(uint8_t type, cheat_realloc_t r, cheat_free_t f, void *arg);
 void             cheat_set_read_cb(cheat_t *ch, cheat_read_cb_t cb);
 void             cheat_set_write_cb(cheat_t *ch, cheat_write_cb_t cb);
 void             cheat_set_trans_cb(cheat_t *ch, cheat_trans_cb_t cb);

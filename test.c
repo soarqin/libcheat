@@ -18,19 +18,19 @@ static inline void* get_addr(uint32_t addr) {
     return &n[8];
 }
 
-int read_cb(uint32_t addr, void *data, int len, int need_conv) {
+int read_cb(void *arg, uint32_t addr, void *data, int len, int need_conv) {
     void *paddr = need_conv ? get_addr(addr) : (void*)(uintptr_t)addr;
     memcpy(data, paddr, len);
     printf("Read %08X from %08X\n", *(uint32_t*)data, paddr);
 }
 
-int write_cb(uint32_t addr, const void *data, int len, int need_conv) {
+int write_cb(void *arg, uint32_t addr, const void *data, int len, int need_conv) {
     void *paddr = need_conv ? get_addr(addr) : (void*)(uintptr_t)addr;
     printf("Write %08X to %08X\n", *(uint32_t*)data, paddr);
     memcpy(need_conv ? get_addr(addr) : (void*)(uintptr_t)addr, data, len);
 }
 
-int trans_cb(uint32_t addr, uint32_t value, int len, int op, int need_conv) {
+int trans_cb(void *arg, uint32_t addr, uint32_t value, int len, int op, int need_conv) {
     void *paddr = need_conv ? get_addr(addr) : (void*)(uintptr_t)addr;
     uint32_t val;
     memcpy(&val, paddr, len);
@@ -50,19 +50,19 @@ int trans_cb(uint32_t addr, uint32_t value, int len, int op, int need_conv) {
     memcpy(paddr, &val, len);
 }
 
-int copy_cb(uint32_t toaddr, uint32_t fromaddr, int len, int need_conv) {
+int copy_cb(void *arg, uint32_t toaddr, uint32_t fromaddr, int len, int need_conv) {
     void *paddr1 = need_conv ? get_addr(toaddr) : (void*)(uintptr_t)toaddr;
     void *paddr2 = need_conv ? get_addr(fromaddr) : (void*)(uintptr_t)fromaddr;
     printf("Copying %d bytes from %08X to %08X\n", fromaddr, toaddr, len);
     memcpy(paddr1, paddr2, len);
 }
 
-static int input_cb(uint32_t buttons) {
+static int input_cb(void *arg, uint32_t buttons) {
     printf("Checking button: %08X\n", buttons);
     return 1;
 }
 
-static void delay_cb(uint32_t millisec) {
+static void delay_cb(void *arg, uint32_t millisec) {
     printf("Delay: %d\n", millisec);
 }
 
@@ -84,13 +84,14 @@ void dump_codes(cheat_t *ch) {
 }
 
 int main() {
-    cheat_t *ch = cheat_new(CH_CWCHEAT);
+    cheat_t *ch = cheat_new(CH_CWCHEAT, NULL);
     cheat_set_read_cb(ch, read_cb);
     cheat_set_write_cb(ch, write_cb);
     cheat_set_trans_cb(ch, trans_cb);
     cheat_set_copy_cb(ch, copy_cb);
     cheat_set_button_cb(ch, input_cb);
     cheat_set_delay_cb(ch, delay_cb);
+
     cheat_add(ch, "_S PCSH10003");
     cheat_add(ch, "_G Dynasty Warriors NEXT");
     cheat_add(ch, "_C1 Section1");

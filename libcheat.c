@@ -16,6 +16,9 @@ enum {
 };
 
 typedef struct cheat_t {
+    // pass-over argument for callbacks
+    void *arg;
+
     // Callback functions
     cheat_read_cb_t     read_cb;
     cheat_write_cb_t    write_cb;
@@ -52,44 +55,45 @@ typedef struct cheat_t {
     cheat_section_t *sections;
 } cheat_t;
 
-int default_read_cb(uint32_t addr, void *data, int len, int need_conv) {
+int default_read_cb(void *arg, uint32_t addr, void *data, int len, int need_conv) {
     return -1;
 }
 
-int default_write_cb(uint32_t addr, const void *data, int len, int need_conv) {
+int default_write_cb(void *arg, uint32_t addr, const void *data, int len, int need_conv) {
     return -1;
 }
 
-int default_trans_cb(uint32_t addr, uint32_t value, int len, int op, int need_conv) {
+int default_trans_cb(void *arg, uint32_t addr, uint32_t value, int len, int op, int need_conv) {
     return -1;
 }
 
-int default_copy_cb(uint32_t toaddr, uint32_t fromaddr, int len, int need_conv) {
+int default_copy_cb(void *arg, uint32_t toaddr, uint32_t fromaddr, int len, int need_conv) {
     return -1;
 }
 
-int default_button_cb(uint32_t buttons) {
+int default_button_cb(void *arg, uint32_t buttons) {
     return 0;
 }
 
-void default_delay_cb(uint32_t millisec) {
+void default_delay_cb(void *arg, uint32_t millisec) {
 }
 
-int default_ext_cb(cheat_code_t *code, const char *op, uint32_t val1, uint32_t val2) {
+int default_ext_cb(void *arg, cheat_code_t *code, const char *op, uint32_t val1, uint32_t val2) {
     return CR_INVALID;
 }
 
-int default_ext_call_cb(int line, const cheat_code_t *code) {
+int default_ext_call_cb(void *arg, int line, const cheat_code_t *code) {
     return CR_INVALID;
 }
 
-cheat_t *cheat_new(uint8_t type) {
-    return cheat_new2(type, realloc, free);
+cheat_t *cheat_new(uint8_t type, void *arg) {
+    return cheat_new2(type, realloc, free, arg);
 }
 
-cheat_t *cheat_new2(uint8_t type, cheat_realloc_t r, cheat_free_t f) {
+cheat_t *cheat_new2(uint8_t type, cheat_realloc_t r, cheat_free_t f, void *arg) {
     cheat_t *ch = (cheat_t*)r(NULL, sizeof(cheat_t));
     if (ch == NULL) return NULL;
+    ch->arg = arg;
     ch->codes = (cheat_code_t*)r(NULL, CODES_CAP_INIT * sizeof(cheat_code_t));
     ch->sections = (cheat_section_t*)r(NULL, SECTIONS_CAP_INIT * sizeof(cheat_section_t));
 
@@ -692,7 +696,7 @@ int cheat_add(cheat_t *ch, const char *line) {
                     if (len > 0) strncpy(ctlcode, s, len);
                     ctlcode[len] = 0;
                     parse_values(line, &val1, &val2);
-                    if (ch->ext_cb(&code, ctlcode, val1, val2) == CR_OK) {
+                    if (ch->ext_cb(ch->arg, &code, ctlcode, val1, val2) == CR_OK) {
                         code.status = ch->status;
                         ch->codes[ch->codes_count++] = code;
                         return CR_OK;
@@ -719,19 +723,19 @@ int cheat_apply(cheat_t *ch) {
         }
         switch(c->op) {
             case CO_WRITE: {
-                ch->write_cb(c->addr, &c->value, c->type, 1);
+                ch->write_cb(ch->arg, c->addr, &c->value, c->type, 1);
                 break;
             }
             case CO_INCR: {
                 switch(c->type) {
                 case CT_I8:
-                    ch->trans_cb(c->addr, c->value, 1, 0, 1);
+                    ch->trans_cb(ch->arg, c->addr, c->value, 1, 0, 1);
                     break;
                 case CT_I16:
-                    ch->trans_cb(c->addr, c->value, 2, 0, 1);
+                    ch->trans_cb(ch->arg, c->addr, c->value, 2, 0, 1);
                     break;
                 case CT_I32:
-                    ch->trans_cb(c->addr, c->value, 4, 0, 1);
+                    ch->trans_cb(ch->arg, c->addr, c->value, 4, 0, 1);
                     break;
                 }
                 break;
@@ -739,13 +743,13 @@ int cheat_apply(cheat_t *ch) {
             case CO_DECR: {
                 switch(c->type) {
                 case CT_I8:
-                    ch->trans_cb(c->addr, c->value, 1, 1, 1);
+                    ch->trans_cb(ch->arg, c->addr, c->value, 1, 1, 1);
                     break;
                 case CT_I16:
-                    ch->trans_cb(c->addr, c->value, 2, 1, 1);
+                    ch->trans_cb(ch->arg, c->addr, c->value, 2, 1, 1);
                     break;
                 case CT_I32:
-                    ch->trans_cb(c->addr, c->value, 4, 1, 1);
+                    ch->trans_cb(ch->arg, c->addr, c->value, 4, 1, 1);
                     break;
                 }
                 break;
@@ -760,7 +764,7 @@ int cheat_apply(cheat_t *ch) {
                 uint32_t incr = c2->value;
                 uint32_t i;
                 for (i = 0; i < count; ++i) {
-                    ch->write_cb(c->addr, &value, 4, 1);
+                    ch->write_cb(ch->arg, c->addr, &value, 4, 1);
                     addr_s += off;
                     value += incr;
                 }
@@ -778,7 +782,7 @@ int cheat_apply(cheat_t *ch) {
                 switch (c->type) {
                     case CT_I8: {
                         for (i = 0; i < count; ++i) {
-                            ch->write_cb(addr, &value, 1, 1);
+                            ch->write_cb(ch->arg, addr, &value, 1, 1);
                             addr += off;
                             value += incr;
                         }
@@ -787,7 +791,7 @@ int cheat_apply(cheat_t *ch) {
                     case CT_I16: {
                         uint16_t *addr_s = (uint16_t*)addr;
                         for (i = 0; i < count; ++i) {
-                            ch->write_cb((uint32_t)addr_s, &value, 2, 1);
+                            ch->write_cb(ch->arg, (uint32_t)addr_s, &value, 2, 1);
                             addr_s += off;
                             value += incr;
                         }
@@ -800,27 +804,27 @@ int cheat_apply(cheat_t *ch) {
                 cheat_code_t *c2;
                 if (i + 1 >= e) break;
                 c2 = &ch->codes[i + 1];
-                ch->copy_cb(c->addr, c2->addr, c->value, 1);
+                ch->copy_cb(ch->arg, c->addr, c2->addr, c->value, 1);
                 break;
             }
             case CO_PTRWRITE: {
                 if (i + 1 >= e) break;
                 cheat_code_t *c2 = &ch->codes[i + 1];
                 uint32_t addr2;
-                if (ch->read_cb(c->addr, &addr2, 4, 1) < 0) break;
-                ch->write_cb(addr2 + c2->value, &c->value, c->type, 0);
+                if (ch->read_cb(ch->arg, c->addr, &addr2, 4, 1) < 0) break;
+                ch->write_cb(ch->arg, addr2 + c2->value, &c->value, c->type, 0);
                 break;
             }
             case CO_BITOR: {
                 switch(c->type) {
                 case CT_I8:
-                    ch->trans_cb(c->addr, c->value, 1, 2, 1);
+                    ch->trans_cb(ch->arg, c->addr, c->value, 1, 2, 1);
                     break;
                 case CT_I16:
-                    ch->trans_cb(c->addr, c->value, 2, 2, 1);
+                    ch->trans_cb(ch->arg, c->addr, c->value, 2, 2, 1);
                     break;
                 case CT_I32:
-                    ch->trans_cb(c->addr, c->value, 4, 2, 1);
+                    ch->trans_cb(ch->arg, c->addr, c->value, 4, 2, 1);
                     break;
                 }
                 break;
@@ -828,13 +832,13 @@ int cheat_apply(cheat_t *ch) {
             case CO_BITAND: {
                 switch(c->type) {
                 case CT_I8:
-                    ch->trans_cb(c->addr, c->value, 1, 3, 1);
+                    ch->trans_cb(ch->arg, c->addr, c->value, 1, 3, 1);
                     break;
                 case CT_I16:
-                    ch->trans_cb(c->addr, c->value, 2, 3, 1);
+                    ch->trans_cb(ch->arg, c->addr, c->value, 2, 3, 1);
                     break;
                 case CT_I32:
-                    ch->trans_cb(c->addr, c->value, 4, 3, 1);
+                    ch->trans_cb(ch->arg, c->addr, c->value, 4, 3, 1);
                     break;
                 }
                 break;
@@ -842,24 +846,24 @@ int cheat_apply(cheat_t *ch) {
             case CO_BITXOR: {
                 switch(c->type) {
                 case CT_I8:
-                    ch->trans_cb(c->addr, c->value, 1, 4, 1);
+                    ch->trans_cb(ch->arg, c->addr, c->value, 1, 4, 1);
                     break;
                 case CT_I16:
-                    ch->trans_cb(c->addr, c->value, 2, 4, 1);
+                    ch->trans_cb(ch->arg, c->addr, c->value, 2, 4, 1);
                     break;
                 case CT_I32:
-                    ch->trans_cb(c->addr, c->value, 4, 4, 1);
+                    ch->trans_cb(ch->arg, c->addr, c->value, 4, 4, 1);
                     break;
                 }
                 break;
             }
             case CO_DELAY: {
-                ch->delay_cb(c->value);
+                ch->delay_cb(ch->arg, c->value);
                 break;
             }
             case CO_STOPPER: {
                 uint32_t val;
-                if (ch->read_cb(c->addr, &val, 4, 1) < 0) break;
+                if (ch->read_cb(ch->arg, c->addr, &val, 4, 1) < 0) break;
                 if (val != c->value) {
                     i = e;
                     ret = CR_STOPPER;
@@ -867,12 +871,12 @@ int cheat_apply(cheat_t *ch) {
                 continue;
             }
             case CO_PRESSED: {
-                if (!ch->input_cb(c->value))
+                if (!ch->input_cb(ch->arg, c->value))
                     i += c->addr;
                 break;
             }
             case CO_NOTPRESSED: {
-                if (ch->input_cb(c->value))
+                if (ch->input_cb(ch->arg, c->value))
                     i += c->addr;
                 break;
             }
@@ -894,13 +898,13 @@ int cheat_apply(cheat_t *ch) {
                 }
                 switch(c->type) {
                     case CT_I8:
-                        if (ch->read_cb(c->addr, &cvalue, 1, 1) < 0) break;
+                        if (ch->read_cb(ch->arg, c->addr, &cvalue, 1, 1) < 0) break;
                         break;
                     case CT_I16:
-                        if (ch->read_cb(c->addr, &cvalue, 2, 1) < 0) break;
+                        if (ch->read_cb(ch->arg, c->addr, &cvalue, 2, 1) < 0) break;
                         break;
                     case CT_I32:
-                        if (ch->read_cb(c->addr, &cvalue, 4, 1) < 0) break;
+                        if (ch->read_cb(ch->arg, c->addr, &cvalue, 4, 1) < 0) break;
                         break;
                 }
                 switch(c->op) {
@@ -920,7 +924,7 @@ int cheat_apply(cheat_t *ch) {
                 break;
             }
             default:
-                if (ch->ext_call_cb(i, c) == CR_STOPPER) {
+                if (ch->ext_call_cb(ch->arg, i, c) == CR_STOPPER) {
                     i = e;
                     ret = CR_STOPPER;
                     continue;
