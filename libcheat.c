@@ -680,6 +680,7 @@ int cheat_add(cheat_t *ch, const char *line) {
                     line += 2;
                     while (*line == ' ' || *line == '\t') ++line;
                     if (ch->ext_cb(&code, op, line) == CR_OK) {
+                        code.status = ch->status;
                         ch->codes[ch->codes_count++] = code;
                         return CR_OK;
                     }
