@@ -84,7 +84,7 @@ typedef void  (*cheat_delay_cb_t)(uint32_t millisec);
 // return CR_OK to add code to list
 typedef int   (*cheat_ext_cb_t)(cheat_code_t *code, const char *op, uint32_t val1, uint32_t val2);
 // return CR_STOPPER to stop code running
-typedef int   (*cheat_ext_call_cb_t)(int line, cheat_code_t *code);
+typedef int   (*cheat_ext_call_cb_t)(int line, const cheat_code_t *code);
 typedef void  *(*cheat_realloc_t)(void *ptr, size_t size);
 typedef void  (*cheat_free_t)(void *ptr);
 

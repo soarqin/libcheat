@@ -79,7 +79,7 @@ int default_ext_cb(cheat_code_t *code, const char *op, uint32_t val1, uint32_t v
     return CR_INVALID;
 }
 
-int default_ext_call_cb(int line, cheat_code_t *code) {
+int default_ext_call_cb(int line, const cheat_code_t *code) {
     return CR_INVALID;
 }
 
