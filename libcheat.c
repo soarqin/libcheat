@@ -35,8 +35,6 @@ typedef struct cheat_t {
 
     // code type
     uint8_t type;
-    // status 1-enable by default
-    uint8_t status;
     // game title id
     char    titleid[16];
 
@@ -237,13 +235,10 @@ int cheat_section_toggle(cheat_t *ch, uint16_t index, int enabled) {
     uint16_t cur, end;
     if (index >= ch->sections_count) return CR_INVALID;
     sec = &ch->sections[index];
-    if (sec->enabled == enabled) return CR_OK;
-    sec->enabled = enabled;
+    if ((sec->status & 1) == enabled) return CR_OK;
+    sec->status = (sec->status & ~5) | enabled;
     cur = sec->code_index;
     end = index + 1 < ch->sections_count ? ch->sections[index + 1].code_index : ch->codes_count;
-    for (; cur < end; ++cur) {
-        ch->codes[cur].status = enabled;
-    }
     return CR_OK;
 }
 
@@ -266,7 +261,6 @@ static inline int add_cwcheat_code(cheat_t *ch, cheat_code_t *code, uint32_t val
         cheat_code_t *last = &ch->codes[ch->codes_count - 1];
         if (last->extra > 0) {
             code->op     = CO_DATA;
-            code->status = last->status;
             code->extra = 0;
             switch (last->op) {
                 case CO_INCR:
@@ -639,7 +633,7 @@ int cheat_add(cheat_t *ch, const char *line) {
                 // Cheat section
                 case 'C': {
                     cheat_section_t *sec;
-                    ch->status = (line[2] > '0' && line[2] <= '9') ? 1 : 0;
+                    uint8_t status = (line[2] >= '0' && line[2] <= '3') ? (line[2] - '0') : (line[2] > '3' ? 1 : 0);
                     line += 3;
                     while (*line == ' ' || *line == '\t') ++line;
                     // check capacity
@@ -654,7 +648,7 @@ int cheat_add(cheat_t *ch, const char *line) {
                     // add section
                     sec = &ch->sections[ch->sections_count++];
                     sec->index = ch->sections_count;
-                    sec->enabled = ch->status;
+                    sec->status = status;
                     sec->code_index = ch->codes_count;
                     strncpy(sec->name, line, 27);
                     sec->name[27] = 0;
@@ -668,7 +662,6 @@ int cheat_add(cheat_t *ch, const char *line) {
                     line += 2;
                     parse_values(line, &val1, &val2);
                     r = add_cwcheat_code(ch, &code, val1, val2);
-                    code.status = ch->status;
                     if (r != CR_MERGED && r != CR_OK) return r;
                     // check capacity
                     {
@@ -697,7 +690,6 @@ int cheat_add(cheat_t *ch, const char *line) {
                     ctlcode[len] = 0;
                     parse_values(line, &val1, &val2);
                     if (ch->ext_cb(ch->arg, &code, ctlcode, val1, val2) == CR_OK) {
-                        code.status = ch->status;
                         ch->codes[ch->codes_count++] = code;
                         return CR_OK;
                     }
@@ -714,224 +706,231 @@ int cheat_add(cheat_t *ch, const char *line) {
 int cheat_apply(cheat_t *ch) {
     int ret = CR_OK;
     int i;
-    int e = ch->codes_count;
+    int e = ch->sections_count;
     for(i = 0; i < e; ++i) {
-        cheat_code_t *c = &ch->codes[i];
-        if (!c->status) {
-            i += c->extra;
+        int j, e2;
+        cheat_section_t *sec = &ch->sections[i];
+        if (!(sec->status & 1) || (sec->status & 4)) {
             continue;
         }
-        switch(c->op) {
-            case CO_WRITE: {
-                ch->write_cb(ch->arg, c->addr, &c->value, c->type, 1);
-                break;
-            }
-            case CO_INCR: {
-                switch(c->type) {
-                case CT_I8:
-                    ch->trans_cb(ch->arg, c->addr, c->value, 1, 0, 1);
-                    break;
-                case CT_I16:
-                    ch->trans_cb(ch->arg, c->addr, c->value, 2, 0, 1);
-                    break;
-                case CT_I32:
-                    ch->trans_cb(ch->arg, c->addr, c->value, 4, 0, 1);
+        e2 = i + 1 < e ? ch->sections[i + 1].code_index : ch->codes_count;
+        for (j = sec->code_index; j < e2; ++j) {
+            cheat_code_t *c = &ch->codes[j];
+            switch(c->op) {
+                case CO_WRITE: {
+                    ch->write_cb(ch->arg, c->addr, &c->value, c->type, 1);
                     break;
                 }
-                break;
-            }
-            case CO_DECR: {
-                switch(c->type) {
-                case CT_I8:
-                    ch->trans_cb(ch->arg, c->addr, c->value, 1, 1, 1);
-                    break;
-                case CT_I16:
-                    ch->trans_cb(ch->arg, c->addr, c->value, 2, 1, 1);
-                    break;
-                case CT_I32:
-                    ch->trans_cb(ch->arg, c->addr, c->value, 4, 1, 1);
-                    break;
-                }
-                break;
-            }
-            case CO_MULWRITE: {
-                if (i + 1 >= e) break;
-                cheat_code_t *c2 = &ch->codes[i + 1];
-                uint32_t addr_s = c->addr;
-                uint32_t count = c->value >> 16;
-                uint32_t off = (c->value & 0xFFFFU) * 4;
-                uint32_t value = c2->addr;
-                uint32_t incr = c2->value;
-                uint32_t i;
-                for (i = 0; i < count; ++i) {
-                    ch->write_cb(ch->arg, c->addr, &value, 4, 1);
-                    addr_s += off;
-                    value += incr;
-                }
-                break;
-            }
-            case CO_MULWRITE2: {
-                if (i + 1 >= e) break;
-                cheat_code_t *c2 = &ch->codes[i + 1];
-                uint32_t count = c->value >> 16;
-                uint32_t addr = c->addr;
-                uint32_t off = c->value & 0xFFFFU;
-                uint32_t value = c2->addr;
-                uint32_t incr = c2->value;
-                uint32_t i;
-                switch (c->type) {
-                    case CT_I8: {
-                        for (i = 0; i < count; ++i) {
-                            ch->write_cb(ch->arg, addr, &value, 1, 1);
-                            addr += off;
-                            value += incr;
-                        }
-                        break;
-                    }
-                    case CT_I16: {
-                        uint16_t *addr_s = (uint16_t*)addr;
-                        for (i = 0; i < count; ++i) {
-                            ch->write_cb(ch->arg, (uint32_t)addr_s, &value, 2, 1);
-                            addr_s += off;
-                            value += incr;
-                        }
-                        break;
-                    }
-                }
-                break;
-            }
-            case CO_COPY: {
-                cheat_code_t *c2;
-                if (i + 1 >= e) break;
-                c2 = &ch->codes[i + 1];
-                ch->copy_cb(ch->arg, c->addr, c2->addr, c->value, 1);
-                break;
-            }
-            case CO_PTRWRITE: {
-                if (i + 1 >= e) break;
-                cheat_code_t *c2 = &ch->codes[i + 1];
-                uint32_t addr2;
-                if (ch->read_cb(ch->arg, c->addr, &addr2, 4, 1) < 0) break;
-                ch->write_cb(ch->arg, addr2 + c2->value, &c->value, c->type, 0);
-                break;
-            }
-            case CO_BITOR: {
-                switch(c->type) {
-                case CT_I8:
-                    ch->trans_cb(ch->arg, c->addr, c->value, 1, 2, 1);
-                    break;
-                case CT_I16:
-                    ch->trans_cb(ch->arg, c->addr, c->value, 2, 2, 1);
-                    break;
-                case CT_I32:
-                    ch->trans_cb(ch->arg, c->addr, c->value, 4, 2, 1);
-                    break;
-                }
-                break;
-            }
-            case CO_BITAND: {
-                switch(c->type) {
-                case CT_I8:
-                    ch->trans_cb(ch->arg, c->addr, c->value, 1, 3, 1);
-                    break;
-                case CT_I16:
-                    ch->trans_cb(ch->arg, c->addr, c->value, 2, 3, 1);
-                    break;
-                case CT_I32:
-                    ch->trans_cb(ch->arg, c->addr, c->value, 4, 3, 1);
-                    break;
-                }
-                break;
-            }
-            case CO_BITXOR: {
-                switch(c->type) {
-                case CT_I8:
-                    ch->trans_cb(ch->arg, c->addr, c->value, 1, 4, 1);
-                    break;
-                case CT_I16:
-                    ch->trans_cb(ch->arg, c->addr, c->value, 2, 4, 1);
-                    break;
-                case CT_I32:
-                    ch->trans_cb(ch->arg, c->addr, c->value, 4, 4, 1);
-                    break;
-                }
-                break;
-            }
-            case CO_DELAY: {
-                ch->delay_cb(ch->arg, c->value);
-                break;
-            }
-            case CO_STOPPER: {
-                uint32_t val;
-                if (ch->read_cb(ch->arg, c->addr, &val, 4, 1) < 0) break;
-                if (val != c->value) {
-                    i = e;
-                    ret = CR_STOPPER;
-                }
-                continue;
-            }
-            case CO_PRESSED: {
-                if (!ch->input_cb(ch->arg, c->value))
-                    i += c->addr;
-                break;
-            }
-            case CO_NOTPRESSED: {
-                if (ch->input_cb(ch->arg, c->value))
-                    i += c->addr;
-                break;
-            }
-            case CO_IFEQUAL:
-            case CO_IFNEQUAL:
-            case CO_IFLESS:
-            case CO_IFGREATER: {
-                uint32_t skip;
-                uint32_t value;
-                uint32_t cvalue;
-                if (c->extra) {
-                    if (i + 1 >= e) break;
-                    cheat_code_t *c2 = &ch->codes[i + 1];
-                    skip = c2->value;
-                    value = c->value;
-                } else {
-                    skip = c->value >> 16;
-                    value = c->value & 0xFFFFU;
-                }
-                switch(c->type) {
+                case CO_INCR: {
+                    switch(c->type) {
                     case CT_I8:
-                        if (ch->read_cb(ch->arg, c->addr, &cvalue, 1, 1) < 0) break;
+                        ch->trans_cb(ch->arg, c->addr, c->value, 1, 0, 1);
                         break;
                     case CT_I16:
-                        if (ch->read_cb(ch->arg, c->addr, &cvalue, 2, 1) < 0) break;
+                        ch->trans_cb(ch->arg, c->addr, c->value, 2, 0, 1);
                         break;
                     case CT_I32:
-                        if (ch->read_cb(ch->arg, c->addr, &cvalue, 4, 1) < 0) break;
+                        ch->trans_cb(ch->arg, c->addr, c->value, 4, 0, 1);
                         break;
+                    }
+                    break;
                 }
-                switch(c->op) {
-                    case CO_IFEQUAL:
-                        if (cvalue != value) i += skip;
+                case CO_DECR: {
+                    switch(c->type) {
+                    case CT_I8:
+                        ch->trans_cb(ch->arg, c->addr, c->value, 1, 1, 1);
                         break;
-                    case CO_IFNEQUAL:
-                        if (cvalue == value) i += skip;
+                    case CT_I16:
+                        ch->trans_cb(ch->arg, c->addr, c->value, 2, 1, 1);
                         break;
-                    case CO_IFLESS:
-                        if (cvalue >= value) i += skip;
+                    case CT_I32:
+                        ch->trans_cb(ch->arg, c->addr, c->value, 4, 1, 1);
                         break;
-                    case CO_IFGREATER:
-                        if (cvalue <= value) i += skip;
-                        break;
+                    }
+                    break;
                 }
-                break;
-            }
-            default:
-                if (ch->ext_call_cb(ch->arg, i, c) == CR_STOPPER) {
-                    i = e;
-                    ret = CR_STOPPER;
+                case CO_MULWRITE: {
+                    if (j + 1 >= e2) break;
+                    cheat_code_t *c2 = &ch->codes[j + 1];
+                    uint32_t addr_s = c->addr;
+                    uint32_t count = c->value >> 16;
+                    uint32_t off = (c->value & 0xFFFFU) * 4;
+                    uint32_t value = c2->addr;
+                    uint32_t incr = c2->value;
+                    uint32_t z;
+                    for (z = 0; z < count; ++z) {
+                        ch->write_cb(ch->arg, c->addr, &value, 4, 1);
+                        addr_s += off;
+                        value += incr;
+                    }
+                    break;
+                }
+                case CO_MULWRITE2: {
+                    if (j + 1 >= e2) break;
+                    cheat_code_t *c2 = &ch->codes[j + 1];
+                    uint32_t count = c->value >> 16;
+                    uint32_t addr = c->addr;
+                    uint32_t off = c->value & 0xFFFFU;
+                    uint32_t value = c2->addr;
+                    uint32_t incr = c2->value;
+                    uint32_t z;
+                    switch (c->type) {
+                        case CT_I8: {
+                            for (z = 0; z < count; ++z) {
+                                ch->write_cb(ch->arg, addr, &value, 1, 1);
+                                addr += off;
+                                value += incr;
+                            }
+                            break;
+                        }
+                        case CT_I16: {
+                            uint16_t *addr_s = (uint16_t*)addr;
+                            for (z = 0; z < count; ++z) {
+                                ch->write_cb(ch->arg, (uint32_t)addr_s, &value, 2, 1);
+                                addr_s += off;
+                                value += incr;
+                            }
+                            break;
+                        }
+                    }
+                    break;
+                }
+                case CO_COPY: {
+                    cheat_code_t *c2;
+                    if (j + 1 >= e2) break;
+                    c2 = &ch->codes[j + 1];
+                    ch->copy_cb(ch->arg, c->addr, c2->addr, c->value, 1);
+                    break;
+                }
+                case CO_PTRWRITE: {
+                    if (j + 1 >= e2) break;
+                    cheat_code_t *c2 = &ch->codes[j + 1];
+                    uint32_t addr2;
+                    if (ch->read_cb(ch->arg, c->addr, &addr2, 4, 1) < 0) break;
+                    ch->write_cb(ch->arg, addr2 + c2->value, &c->value, c->type, 0);
+                    break;
+                }
+                case CO_BITOR: {
+                    switch(c->type) {
+                    case CT_I8:
+                        ch->trans_cb(ch->arg, c->addr, c->value, 1, 2, 1);
+                        break;
+                    case CT_I16:
+                        ch->trans_cb(ch->arg, c->addr, c->value, 2, 2, 1);
+                        break;
+                    case CT_I32:
+                        ch->trans_cb(ch->arg, c->addr, c->value, 4, 2, 1);
+                        break;
+                    }
+                    break;
+                }
+                case CO_BITAND: {
+                    switch(c->type) {
+                    case CT_I8:
+                        ch->trans_cb(ch->arg, c->addr, c->value, 1, 3, 1);
+                        break;
+                    case CT_I16:
+                        ch->trans_cb(ch->arg, c->addr, c->value, 2, 3, 1);
+                        break;
+                    case CT_I32:
+                        ch->trans_cb(ch->arg, c->addr, c->value, 4, 3, 1);
+                        break;
+                    }
+                    break;
+                }
+                case CO_BITXOR: {
+                    switch(c->type) {
+                    case CT_I8:
+                        ch->trans_cb(ch->arg, c->addr, c->value, 1, 4, 1);
+                        break;
+                    case CT_I16:
+                        ch->trans_cb(ch->arg, c->addr, c->value, 2, 4, 1);
+                        break;
+                    case CT_I32:
+                        ch->trans_cb(ch->arg, c->addr, c->value, 4, 4, 1);
+                        break;
+                    }
+                    break;
+                }
+                case CO_DELAY: {
+                    ch->delay_cb(ch->arg, c->value);
+                    break;
+                }
+                case CO_STOPPER: {
+                    uint32_t val;
+                    if (ch->read_cb(ch->arg, c->addr, &val, 4, 1) < 0) break;
+                    if (val != c->value) {
+                        i = e;
+                        j = e2;
+                        ret = CR_STOPPER;
+                    }
                     continue;
                 }
-                break;
+                case CO_PRESSED: {
+                    if (!ch->input_cb(ch->arg, c->value))
+                        j += c->addr;
+                    break;
+                }
+                case CO_NOTPRESSED: {
+                    if (ch->input_cb(ch->arg, c->value))
+                        j += c->addr;
+                    break;
+                }
+                case CO_IFEQUAL:
+                case CO_IFNEQUAL:
+                case CO_IFLESS:
+                case CO_IFGREATER: {
+                    uint32_t skip;
+                    uint32_t value;
+                    uint32_t cvalue;
+                    if (c->extra) {
+                        if (j + 1 >= e2) break;
+                        cheat_code_t *c2 = &ch->codes[j + 1];
+                        skip = c2->value;
+                        value = c->value;
+                    } else {
+                        skip = c->value >> 16;
+                        value = c->value & 0xFFFFU;
+                    }
+                    switch(c->type) {
+                        case CT_I8:
+                            if (ch->read_cb(ch->arg, c->addr, &cvalue, 1, 1) < 0) break;
+                            break;
+                        case CT_I16:
+                            if (ch->read_cb(ch->arg, c->addr, &cvalue, 2, 1) < 0) break;
+                            break;
+                        case CT_I32:
+                            if (ch->read_cb(ch->arg, c->addr, &cvalue, 4, 1) < 0) break;
+                            break;
+                    }
+                    switch(c->op) {
+                        case CO_IFEQUAL:
+                            if (cvalue != value) j += skip;
+                            break;
+                        case CO_IFNEQUAL:
+                            if (cvalue == value) j += skip;
+                            break;
+                        case CO_IFLESS:
+                            if (cvalue >= value) j += skip;
+                            break;
+                        case CO_IFGREATER:
+                            if (cvalue <= value) j += skip;
+                            break;
+                    }
+                    break;
+                }
+                default:
+                    if (ch->ext_call_cb(ch->arg, j, c) == CR_STOPPER) {
+                        i = e;
+                        j = e2;
+                        ret = CR_STOPPER;
+                        continue;
+                    }
+                    break;
+            }
+            j += c->extra;
         }
-        i += c->extra;
+        if (sec->status & 2) sec->status |= 4;
     }
     return ret;
 }

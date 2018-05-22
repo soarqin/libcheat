@@ -47,7 +47,10 @@ enum {
 // Cheat section struct
 typedef struct cheat_section_t {
     uint8_t  index;      // section index
-    uint8_t  enabled;    // enabled
+    uint8_t  status;     // status:
+                         //   bit0: enabled
+                         //   bit1: run only once
+                         //   bit2: codes have been run once
     uint16_t code_index; // index in codes array
     char name[28];       // section name with maximum of 27 chars, exceeded characters will be truncated
 } cheat_section_t;
@@ -56,8 +59,8 @@ typedef struct cheat_section_t {
 typedef struct cheat_code_t {
     uint8_t  op;      // operation
     uint8_t  type;    // data type
-    uint8_t  status;  // 0-disabled 1-enabled
     uint8_t  extra;   // extra lines used by this code
+    uint8_t  padding;
     uint32_t addr;
     uint32_t value;
 } cheat_code_t;

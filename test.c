@@ -74,12 +74,12 @@ void dump_codes(cheat_t *ch) {
     count = cheat_get_sections(ch, &sections);
     for (i = 0; i < count; ++i) {
         const cheat_section_t *s = &sections[i];
-        printf("  %c %2d %4d %s\n", s->enabled ? 'o' : 'x', s->index, s->code_index, s->name);
+        printf(" %c%c %2d %4d %s\n", s->status & 4 ? '!' : ' ', s->status & 1 ? 'o' : 'x', s->index, s->code_index, s->name);
     }
     count = cheat_get_codes(ch, &codes);
     for (i = 0; i < count; ++i) {
         const cheat_code_t *c = &codes[i];
-        printf("  %c%c %2d %2d %08X %08X\n", c->status ? 'o' : 'x', c->extra ? '+' : ' ', c->op, c->type, c->addr, c->value);
+        printf("  %c %2d %2d %08X %08X\n", c->extra ? '+' : ' ', c->op, c->type, c->addr, c->value);
     }
 }
 
@@ -113,7 +113,7 @@ int main() {
     cheat_add(ch, "_L 0x81234567 0x00040020");
     cheat_add(ch, "_L 0x12345678 0x00000008");
 
-    cheat_add(ch, "_C1 Section2");
+    cheat_add(ch, "_C3 Section2");
     cheat_add(ch, "_L 0x61000000 0x12345678");
     cheat_add(ch, "_L 0x00000001 0x00000004");
     cheat_add(ch, "_L 0x61000000 0x12345678");
@@ -216,8 +216,11 @@ int main() {
 
     printf("First pass\n");
     cheat_apply(ch);
-    cheat_section_toggle(ch, 1, 0);
     printf("Second pass\n");
+    cheat_apply(ch);
+    cheat_section_toggle(ch, 1, 0);
+    cheat_section_toggle(ch, 1, 1);
+    printf("Third pass\n");
     cheat_apply(ch);
 
     cheat_finish(ch);
