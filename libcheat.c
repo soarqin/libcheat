@@ -596,6 +596,18 @@ static inline int add_cwcheat_code(cheat_t *ch, cheat_code_t *code, uint32_t val
     return CR_OK;
 }
 
+static inline void do_add_code(cheat_t *ch, cheat_code_t *code) {
+    // check capacity
+    int cap = ch->codes_cap;
+    if (ch->codes_count >= cap) {
+        cap += CODES_CAP_INCREMENT;
+        ch->codes = (cheat_code_t*)ch->realloc_func(ch->codes, cap * sizeof(cheat_code_t));
+        ch->codes_cap = cap;
+    }
+    // add code
+    ch->codes[ch->codes_count++] = *code;
+}
+
 int cheat_add(cheat_t *ch, const char *line) {
     cheat_code_t code;
 
@@ -660,17 +672,7 @@ int cheat_add(cheat_t *ch, const char *line) {
                     parse_values(line, &val1, &val2);
                     r = add_cwcheat_code(ch, &code, val1, val2);
                     if (r != CR_MERGED && r != CR_OK) return r;
-                    // check capacity
-                    {
-                        int cap = ch->codes_cap;
-                        if (ch->codes_count >= cap) {
-                            cap += CODES_CAP_INCREMENT;
-                            ch->codes = (cheat_code_t*)ch->realloc_func(ch->codes, cap * sizeof(cheat_code_t));
-                            ch->codes_cap = cap;
-                        }
-                    }
-                    // add code
-                    ch->codes[ch->codes_count++] = code;
+                    do_add_code(ch, &code);
                     return code.extra ? CR_MORELINE : CR_OK;
                 }
                 default: {
@@ -687,7 +689,7 @@ int cheat_add(cheat_t *ch, const char *line) {
                     ctlcode[len] = 0;
                     parse_values(line, &val1, &val2);
                     if (ch->ext_cb(ch->arg, &code, ctlcode, val1, val2) == CR_OK) {
-                        ch->codes[ch->codes_count++] = code;
+                        do_add_code(ch, &code);
                         return CR_OK;
                     }
                     return CR_INVALID;
