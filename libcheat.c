@@ -232,13 +232,10 @@ cheat_section_t *cheat_get_section(cheat_t *ch, int index) {
 
 int cheat_section_toggle(cheat_t *ch, uint16_t index, int enabled) {
     cheat_section_t *sec;
-    uint16_t cur, end;
     if (index >= ch->sections_count) return CR_INVALID;
     sec = &ch->sections[index];
     if ((sec->status & 1) == enabled) return CR_OK;
     sec->status = (sec->status & ~5) | enabled;
-    cur = sec->code_index;
-    end = index + 1 < ch->sections_count ? ch->sections[index + 1].code_index : ch->codes_count;
     return CR_OK;
 }
 
