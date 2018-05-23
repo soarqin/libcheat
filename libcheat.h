@@ -31,6 +31,10 @@ enum {
     CO_IFNEQUAL,
     CO_IFLESS,
     CO_IFGREATER,
+    CO_ADDRIFEQUAL,
+    CO_ADDRIFNEQUAL,
+    CO_ADDRIFLESS,
+    CO_ADDRIFGREATER,
     CO_DATA,      // used as data for multi-line cheat
     CO_EXTENSION, // opcode above this is extension codes registered by cheat_ext_cb_t,
                   // they are running through cheat_ext_call_cb_t,

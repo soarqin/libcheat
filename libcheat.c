@@ -338,6 +338,15 @@ static inline int add_cwcheat_code(cheat_t *ch, cheat_code_t *code, uint32_t val
                 case CO_IFNEQUAL:
                 case CO_IFLESS:
                 case CO_IFGREATER:
+                    last->value = val2;
+                    code->type = last->type;
+                    code->value = val1;
+                    code->addr = 0;
+                    return CR_OK;
+                case CO_ADDRIFEQUAL:
+                case CO_ADDRIFNEQUAL:
+                case CO_ADDRIFLESS:
+                case CO_ADDRIFGREATER:
                     switch (val2 & 0x0F) {
                         case 0:
                             last->type = code->type = CT_I8;
@@ -541,16 +550,16 @@ static inline int add_cwcheat_code(cheat_t *ch, cheat_code_t *code, uint32_t val
                 case 7:
                     switch (val2 >> 28) {
                         case 4:
-                            code->op = CO_IFEQUAL;
+                            code->op = CO_ADDRIFEQUAL;
                             break;
                         case 5:
-                            code->op = CO_IFNEQUAL;
+                            code->op = CO_ADDRIFNEQUAL;
                             break;
                         case 6:
-                            code->op = CO_IFLESS;
+                            code->op = CO_ADDRIFLESS;
                             break;
                         case 7:
-                            code->op = CO_IFGREATER;
+                            code->op = CO_ADDRIFGREATER;
                             break;
                     }
                     code->type  = CT_I32;
@@ -581,15 +590,23 @@ static inline int add_cwcheat_code(cheat_t *ch, cheat_code_t *code, uint32_t val
                 case 0:
                     code->type  = CT_I16;
                     code->value = val1 & 0x00FFFFFFU;
+                    code->extra = 0;
+                    code->addr  = val2 & 0x0FFFFFFFU;
                     break;
                 case 1:
                     code->type  = CT_I8;
                     code->value = val1 & 0x00FF00FFU;
+                    code->extra = 0;
+                    code->addr  = val2 & 0x0FFFFFFFU;
+                    break;
+                case 2:
+                    code->type  = CT_I32;
+                    code->value = 0;
+                    code->extra = 1;
+                    code->addr  = val2 & 0x0FFFFFFFU;
                     break;
                 default: return CR_INVALID;
             }
-            code->extra = 0;
-            code->addr  = val2 & 0x0FFFFFFFU;
             break;
         default: return CR_INVALID;
     }
@@ -891,6 +908,7 @@ int cheat_apply(cheat_t *ch) {
                         skip = c->value >> 16;
                         value = c->value & 0xFFFFU;
                     }
+                    cvalue = 0U;
                     switch(c->type) {
                         case CT_I8:
                             if (ch->read_cb(ch->arg, c->addr, &cvalue, 1, 1) < 0) break;
@@ -900,6 +918,50 @@ int cheat_apply(cheat_t *ch) {
                             break;
                         case CT_I32:
                             if (ch->read_cb(ch->arg, c->addr, &cvalue, 4, 1) < 0) break;
+                            break;
+                    }
+                    switch(c->op) {
+                        case CO_IFEQUAL:
+                            if (cvalue != value) j += skip;
+                            break;
+                        case CO_IFNEQUAL:
+                            if (cvalue == value) j += skip;
+                            break;
+                        case CO_IFLESS:
+                            if (cvalue >= value) j += skip;
+                            break;
+                        case CO_IFGREATER:
+                            if (cvalue <= value) j += skip;
+                            break;
+                    }
+                    break;
+                }
+                case CO_ADDRIFEQUAL:
+                case CO_ADDRIFNEQUAL:
+                case CO_ADDRIFLESS:
+                case CO_ADDRIFGREATER: {
+                    uint32_t skip;
+                    uint32_t addr2;
+                    uint32_t value;
+                    uint32_t cvalue;
+                    if (!c->extra) continue;
+                    if (j + 1 >= e2) break;
+                    cheat_code_t *c2 = &ch->codes[j + 1];
+                    skip = c2->value;
+                    addr2 = c->value;
+                    value = cvalue = 0U;
+                    switch(c->type) {
+                        case CT_I8:
+                            if (ch->read_cb(ch->arg, c->addr, &cvalue, 1, 1) < 0) break;
+                            if (ch->read_cb(ch->arg, addr2, &value, 1, 1) < 0) break;
+                            break;
+                        case CT_I16:
+                            if (ch->read_cb(ch->arg, c->addr, &cvalue, 2, 1) < 0) break;
+                            if (ch->read_cb(ch->arg, addr2, &value, 2, 1) < 0) break;
+                            break;
+                        case CT_I32:
+                            if (ch->read_cb(ch->arg, c->addr, &cvalue, 4, 1) < 0) break;
+                            if (ch->read_cb(ch->arg, addr2, &value, 4, 1) < 0) break;
                             break;
                     }
                     switch(c->op) {
