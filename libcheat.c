@@ -334,6 +334,11 @@ static inline int add_cwcheat_code(cheat_t *ch, cheat_code_t *code, uint32_t val
                         default: return CR_INVALID;
                     }
                     return CR_OK;
+                case CO_PTRCHAINWRITE:
+                    code->addr  = val1;
+                    code->value = val2;
+                    code->extra = last->extra - 1;
+                    return CR_OK;
                 case CO_IFEQUAL:
                 case CO_IFNEQUAL:
                 case CO_IFLESS:
@@ -489,6 +494,23 @@ static inline int add_cwcheat_code(cheat_t *ch, cheat_code_t *code, uint32_t val
                     code->op    = CO_BITXOR;
                     code->type  = CT_I16;
                     code->value = val2 & 0xFFFFU;
+                    break;
+            }
+            break;
+        case 9:
+            code->op    = CO_PTRCHAINWRITE;
+            code->addr  = val1 & 0x0FFFFFFFU;
+            code->value = 0;
+            code->extra = val2 & 0xFFFFU;
+            switch (val2 >> 28) {
+                case 0:
+                    code->type = CT_I8;
+                    break;
+                case 1:
+                    code->type = CT_I16;
+                    break;
+                default:
+                    code->type = CT_I32;
                     break;
             }
             break;
@@ -824,6 +846,26 @@ int cheat_apply(cheat_t *ch) {
                     uint32_t addr2;
                     if (ch->read_cb(ch->arg, c->addr, &addr2, 4, 1) < 0) break;
                     ch->write_cb(ch->arg, addr2 + c2->value, &c->value, c->type, 0);
+                    break;
+                }
+                case CO_PTRCHAINWRITE: {
+                    uint16_t z;
+                    uint32_t addr;
+                    uint32_t addr_next;
+                    cheat_code_t *c2;
+                    if (j + c->extra >= e2) break;
+                    addr = c->addr;
+                    if (ch->read_cb(ch->arg, addr, &addr_next, 4, 1) < 0) break;
+                    for (z = 1; z < c->extra; ++z) {
+                        c2 = &ch->codes[j + z];
+                        addr = addr_next + c2->addr;
+                        if (ch->read_cb(ch->arg, addr, &addr_next, 4, 0) < 0) {
+                            z = 0; break;
+                        }
+                    }
+                    if (z == 0) break;
+                    c2 = &ch->codes[j + c->extra];
+                    ch->write_cb(ch->arg, addr_next + c2->addr, &c2->value, c->type, 0);
                     break;
                 }
                 case CO_BITOR: {

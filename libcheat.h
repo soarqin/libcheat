@@ -20,6 +20,7 @@ enum {
     CO_MULWRITE2,
     CO_COPY,
     CO_PTRWRITE,
+    CO_PTRCHAINWRITE,
     CO_BITOR,
     CO_BITAND,
     CO_BITXOR,
@@ -63,8 +64,7 @@ typedef struct cheat_section_t {
 typedef struct cheat_code_t {
     uint8_t  op;      // operation
     uint8_t  type;    // data type
-    uint8_t  extra;   // extra lines used by this code
-    uint8_t  padding;
+    uint16_t extra;   // extra lines used by this code
     uint32_t addr;
     uint32_t value;
 } cheat_code_t;
