@@ -676,8 +676,8 @@ int cheat_add(cheat_t *ch, const char *line) {
                     sec->index = ch->sections_count;
                     sec->status = status;
                     sec->code_index = ch->codes_count;
-                    strncpy(sec->name, line, 27);
-                    sec->name[27] = 0;
+                    strncpy(sec->name, line, 59);
+                    sec->name[59] = 0;
                     return CR_OK;
                 }
 

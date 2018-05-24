@@ -56,7 +56,7 @@ typedef struct cheat_section_t {
                          //   bit1: run only once
                          //   bit2: codes have been run once
     uint16_t code_index; // index in codes array
-    char name[28];       // section name with maximum of 27 chars, exceeded characters will be truncated
+    char name[60];       // section name with maximum of 59 chars, exceeded characters will be truncated
 } cheat_section_t;
 
 // Cheat code struct
