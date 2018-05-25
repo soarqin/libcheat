@@ -257,7 +257,7 @@ static inline int add_cwcheat_code(cheat_t *ch, cheat_code_t *code, uint32_t val
     if (ch->codes_count > 0) {
         cheat_code_t *last = &ch->codes[ch->codes_count - 1];
         if (last->extra > 0) {
-            code->op     = CO_DATA;
+            code->op    = last->op;
             code->extra = 0;
             switch (last->op) {
                 case CO_INCR:
@@ -336,6 +336,7 @@ static inline int add_cwcheat_code(cheat_t *ch, cheat_code_t *code, uint32_t val
                     return CR_OK;
                 case CO_PTRCHAINWRITE:
                     code->addr  = val1;
+                    code->type  = last->type;
                     code->value = val2;
                     code->extra = last->extra - 1;
                     return CR_OK;
