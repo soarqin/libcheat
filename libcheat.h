@@ -21,6 +21,8 @@ enum {
     CO_COPY,
     CO_PTRWRITE,
     CO_PTRCHAINWRITE,
+    CO_MULPTRCHAINWRITE,
+    CO_PTRCHAINCOPY,
     CO_BITOR,
     CO_BITAND,
     CO_BITXOR,
@@ -38,6 +40,7 @@ enum {
     CO_ADDRIFGREATER,
     CO_EXTENSION, // opcode above this is extension codes registered by cheat_ext_cb_t,
                   // they are running through cheat_ext_call_cb_t,
+    CO_DATA_BIT = 0x80,  // this bit is set to indicate this is an extra data line for cheat
 };
 
 enum {
@@ -63,7 +66,8 @@ typedef struct cheat_section_t {
 typedef struct cheat_code_t {
     uint8_t  op;      // operation
     uint8_t  type;    // data type
-    uint16_t extra;   // extra lines used by this code
+    uint8_t  extra;   // extra lines used by this code, 255 at maximum
+    uint8_t  padding; // reserved for future use
     uint32_t addr;
     uint32_t value;
 } cheat_code_t;

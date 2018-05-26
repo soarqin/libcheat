@@ -257,9 +257,9 @@ static inline int add_cwcheat_code(cheat_t *ch, cheat_code_t *code, uint32_t val
     if (ch->codes_count > 0) {
         cheat_code_t *last = &ch->codes[ch->codes_count - 1];
         if (last->extra > 0) {
-            code->op    = last->op;
+            code->op    = last->op | 0x80;
             code->extra = 0;
-            switch (last->op) {
+            switch (last->op & 0x7F) {
                 case CO_INCR:
                 case CO_DECR:
                     last->value = val1;
@@ -335,6 +335,7 @@ static inline int add_cwcheat_code(cheat_t *ch, cheat_code_t *code, uint32_t val
                     }
                     return CR_OK;
                 case CO_PTRCHAINWRITE:
+                case CO_PTRCHAINCOPY:
                     code->addr  = val1;
                     code->type  = last->type;
                     code->value = val2;
@@ -498,11 +499,24 @@ static inline int add_cwcheat_code(cheat_t *ch, cheat_code_t *code, uint32_t val
                     break;
             }
             break;
-        case 9:
-            code->op    = CO_PTRCHAINWRITE;
+        case 9: {
+            uint32_t sub = (val2 >> 24) & 0x0F;
+            switch(sub) {
+                case 1:
+                    code->op = CO_PTRCHAINCOPY;
+                    code->value = 0;
+                    break;
+                case 2:
+                    code->op = CO_MULPTRCHAINWRITE;
+                    code->value = (val2 >> 8) & 0xFFFFU;
+                    break;
+                default:
+                    code->op = CO_PTRCHAINWRITE;
+                    code->value = 0;
+                    break;
+            }
             code->addr  = val1 & 0x0FFFFFFFU;
-            code->value = 0;
-            code->extra = val2 & 0xFFFFU;
+            code->extra = (uint8_t)(val2 & 0xFFU);
             switch (val2 >> 28) {
                 case 0:
                     code->type = CT_I8;
@@ -515,6 +529,7 @@ static inline int add_cwcheat_code(cheat_t *ch, cheat_code_t *code, uint32_t val
                     break;
             }
             break;
+        }
         case 0xB:
             code->op    = CO_DELAY;
             code->type  = CT_NONE;
@@ -854,19 +869,81 @@ int cheat_apply(cheat_t *ch) {
                     uint32_t addr;
                     uint32_t addr_next;
                     cheat_code_t *c2;
-                    if (j + c->extra >= e2) break;
+                    if (c->extra < 1 || j + c->extra >= e2) break;
                     addr = c->addr;
-                    if (ch->read_cb(ch->arg, addr, &addr_next, 4, 1) < 0) break;
-                    for (z = 1; z < c->extra; ++z) {
-                        c2 = &ch->codes[j + z];
-                        addr = addr_next + c2->addr;
-                        if (ch->read_cb(ch->arg, addr, &addr_next, 4, 0) < 0) {
+                    for (z = 1; z <= c->extra; ++z) {
+                        if (ch->read_cb(ch->arg, addr, &addr_next, 4, z == 1) < 0) {
                             z = 0; break;
                         }
+                        c2 = &ch->codes[j + z];
+                        addr = addr_next + c2->addr;
                     }
                     if (z == 0) break;
+                    ch->write_cb(ch->arg, addr, &c2->value, c->type, 0);
+                    break;
+                }
+                case CO_MULPTRCHAINWRITE: {
+                    uint32_t y, z;
+                    uint32_t addr, addr_, addr_next, addr_delta;
+                    cheat_code_t *c2;
+                    uint32_t count;
+                    uint32_t index;
+                    uint32_t value_, value_delta;
+                    if (c->extra < 2 || j + c->extra >= e2) break;
                     c2 = &ch->codes[j + c->extra];
-                    ch->write_cb(ch->arg, addr_next + c2->addr, &c2->value, c->type, 0);
+                    index = c2->addr >> 24;
+                    if (index >= c->extra) break;
+                    count = (c->value >> 8) & 0xFFFFU;
+                    addr_delta = c2->addr & 0xFFFFFFU;
+                    value_delta = c2->value;
+                    addr_ = c->addr;
+                    ++index;
+                    for (z = 1; z <= index; ++z) {
+                        if (ch->read_cb(ch->arg, addr_, &addr_next, 4, z == 1) < 0) {
+                            z = 0; break;
+                        }
+                        c2 = &ch->codes[j + z];
+                        addr_ = addr_next + c2->addr;
+                    }
+                    value_ = ch->codes[j + c->extra - 1].value;
+                    for (y = 0; y < count; ++y, addr_ += addr_delta, value_ += value_delta) {
+                        addr = addr_;
+                        for (; z < c->extra; ++z) {
+                            if (ch->read_cb(ch->arg, addr, &addr_next, 4, z == 1) < 0) {
+                                z = 0; break;
+                            }
+                            c2 = &ch->codes[j + z];
+                            addr = addr_next + c2->addr;
+                        }
+                        if (z == 0) break;
+                        ch->write_cb(ch->arg, addr, &value_, c->type, 0);
+                    }
+                    break;
+                }
+                case CO_PTRCHAINCOPY: {
+                    uint16_t z;
+                    uint32_t value;
+                    uint32_t addr, addr2;
+                    uint32_t addr_next, addr_next2;
+                    cheat_code_t *c2;
+                    if (c->extra < 1 || j + c->extra >= e2) break;
+                    addr = c->addr;
+                    addr2 = ch->codes[j + 1].addr;
+                    for (z = 2; z <= c->extra; ++z) {
+                        int need_conv = z == 2;
+                        if (ch->read_cb(ch->arg, addr, &addr_next, 4, need_conv) < 0) {
+                            z = 0; break;
+                        }
+                        if (ch->read_cb(ch->arg, addr2, &addr_next2, 4, need_conv) < 0) {
+                            z = 0; break;
+                        }
+                        c2 = &ch->codes[j + z];
+                        addr = addr_next + c2->addr;
+                        addr2 = addr_next2 + c2->value;
+                    }
+                    if (z == 0) break;
+                    if (ch->read_cb(ch->arg, addr2, &value, c->type, 0) < 0) break;
+                    ch->write_cb(ch->arg, addr, &value, c->type, 0);
                     break;
                 }
                 case CO_BITOR: {
