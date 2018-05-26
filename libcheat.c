@@ -898,7 +898,7 @@ int cheat_apply(cheat_t *ch) {
                     value_delta = c2->value;
                     addr_ = c->addr;
                     ++index;
-                    for (z = 1; z <= index; ++z) {
+                    for (z = 1; z < index; ++z) {
                         if (ch->read_cb(ch->arg, addr_, &addr_next, 4, z == 1) < 0) {
                             z = 0; break;
                         }
