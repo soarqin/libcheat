@@ -336,6 +336,7 @@ static inline int add_cwcheat_code(cheat_t *ch, cheat_code_t *code, uint32_t val
                     return CR_OK;
                 case CO_PTRCHAINWRITE:
                 case CO_PTRCHAINCOPY:
+                case CO_MULPTRCHAINWRITE:
                     code->addr  = val1;
                     code->type  = last->type;
                     code->value = val2;
@@ -893,7 +894,7 @@ int cheat_apply(cheat_t *ch) {
                     c2 = &ch->codes[j + c->extra];
                     index = c2->addr >> 24;
                     if (index >= c->extra) break;
-                    count = (c->value >> 8) & 0xFFFFU;
+                    count = c->value;
                     addr_delta = c2->addr & 0xFFFFFFU;
                     value_delta = c2->value;
                     addr_ = c->addr;
@@ -908,7 +909,7 @@ int cheat_apply(cheat_t *ch) {
                     value_ = ch->codes[j + c->extra - 1].value;
                     for (y = 0; y < count; ++y, addr_ += addr_delta, value_ += value_delta) {
                         addr = addr_;
-                        for (; z < c->extra; ++z) {
+                        for (z = index; z < c->extra; ++z) {
                             if (ch->read_cb(ch->arg, addr, &addr_next, 4, z == 1) < 0) {
                                 z = 0; break;
                             }

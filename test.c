@@ -12,23 +12,20 @@ typedef struct {
 
 typedef struct {
     int n[10];
-    test_level3 *l3;
-    test_level3 *l3_;
+    test_level3 *l3[5];
 } test_level2;
 
 typedef struct {
     int n[5];
-    test_level2 *l2;
-    test_level2 *l2_;
+    test_level2 *l2[5];
 } test_level1;
 
 typedef struct {
     int n[8];
-    test_level1 *l1;
-    test_level1 *l1_;
+    test_level1 *l1[5];
 } test_level0;
 
-static test_level0 *test_val, *test_val2;
+static test_level0 *test_val, *test_val2, *test_val3[5];
 
 static inline void* get_addr(uint32_t addr) {
     static uint32_t n[256] = {};
@@ -39,6 +36,16 @@ static inline void* get_addr(uint32_t addr) {
             n[8] = 0x87654321U;
             n[0] = 1;
         } else n[8] = 0;
+    } else if (addr == 0x00008870) {
+        return &test_val3[0];
+    } else if (addr == 0x00008874) {
+        return &test_val3[1];
+    } else if (addr == 0x00008878) {
+        return &test_val3[2];
+    } else if (addr == 0x0000887C) {
+        return &test_val3[3];
+    } else if (addr == 0x00008880) {
+        return &test_val3[4];
     } else if (addr == 0x00008884) {
         return &test_val2;
     } else if (addr == 0x00008888) {
@@ -115,13 +122,25 @@ void dump_codes(cheat_t *ch) {
 
 int main() {
     test_val = (test_level0*)calloc(1, sizeof(test_level0));
-    test_val->l1 = (test_level1*)calloc(1, sizeof(test_level1));
-    test_val->l1->l2 = (test_level2*)calloc(1, sizeof(test_level2));
-    test_val->l1->l2->l3 = (test_level3*)calloc(1, sizeof(test_level3));
+    test_val->l1[0] = (test_level1*)calloc(1, sizeof(test_level1));
+    test_val->l1[0]->l2[0] = (test_level2*)calloc(1, sizeof(test_level2));
+    test_val->l1[0]->l2[0]->l3[0] = (test_level3*)calloc(1, sizeof(test_level3));
     test_val2 = (test_level0*)calloc(1, sizeof(test_level0));
-    test_val2->l1_ = (test_level1*)calloc(1, sizeof(test_level1));
-    test_val2->l1_->l2_ = (test_level2*)calloc(1, sizeof(test_level2));
-    test_val2->l1_->l2_->l3_ = (test_level3*)calloc(1, sizeof(test_level3));
+    test_val2->l1[1] = (test_level1*)calloc(1, sizeof(test_level1));
+    test_val2->l1[1]->l2[1] = (test_level2*)calloc(1, sizeof(test_level2));
+    test_val2->l1[1]->l2[1]->l3[1] = (test_level3*)calloc(1, sizeof(test_level3));
+    for (int h = 0; h < 5; ++h) {
+        test_val3[h] = (test_level0*)calloc(1, sizeof(test_level0));
+        for (int i = 0; i < 5; ++i) {
+            test_val3[h]->l1[i] = (test_level1*)calloc(1, sizeof(test_level1));
+            for (int j = 0; j < 5; ++j) {
+                test_val3[h]->l1[i]->l2[j] = (test_level2*)calloc(1, sizeof(test_level2));
+                for (int k = 0; k < 5; ++k) {
+                    test_val3[h]->l1[i]->l2[j]->l3[k] = (test_level3*)calloc(1, sizeof(test_level3));
+                }
+            }
+        }
+    }
 
     cheat_t *ch = cheat_new(CH_CWCHEAT, NULL);
     cheat_set_read_cb(ch, read_cb);
@@ -264,11 +283,21 @@ int main() {
     cheat_add(ch, "_L 0x0000002C 0x00000028");
     cheat_add(ch, "_L 0x00000004 0x00000008");
 
+    cheat_add(ch, "_L 0x90008870 0x22000505");
+    cheat_add(ch, "_L 0x00000020 0x00000000");
+    cheat_add(ch, "_L 0x00000014 0x00000000");
+    cheat_add(ch, "_L 0x00000028 0x00000000");
+    cheat_add(ch, "_L 0x00000004 0x0000F00D");
+    cheat_add(ch, "_L 0x03000004 0x00000028");
+
     dump_codes(ch);
 
     printf("First pass\n");
     cheat_apply(ch);
-    printf("%X %X\n", test_val->l1->l2->l3->c, test_val2->l1_->l2_->l3_->b);
+    printf("%X %X\n", test_val->l1[0]->l2[0]->l3[0]->c, test_val2->l1[1]->l2[1]->l3[1]->b);
+    for (int i = 0; i < 5; ++i) {
+        printf("%X\n", test_val3[0]->l1[0]->l2[0]->l3[i]->b);
+    }
     printf("Second pass\n");
     cheat_apply(ch);
     cheat_section_toggle(ch, 1, 0);
@@ -278,13 +307,25 @@ int main() {
 
     cheat_finish(ch);
 
-    free(test_val2->l1_->l2_->l3_);
-    free(test_val2->l1_->l2_);
-    free(test_val2->l1_);
+    for (int h = 0; h < 5; ++h) {
+        for (int i = 0; i < 5; ++i) {
+            for (int j = 0; j < 5; ++j) {
+                for (int k = 0; k < 5; ++k) {
+                    free(test_val3[h]->l1[i]->l2[j]->l3[k]);
+                }
+                free(test_val3[h]->l1[i]->l2[j]);
+            }
+            free(test_val3[h]->l1[i]);
+        }
+        free(test_val3[h]);
+    }
+    free(test_val2->l1[1]->l2[1]->l3[1]);
+    free(test_val2->l1[1]->l2[1]);
+    free(test_val2->l1[1]);
     free(test_val2);
-    free(test_val->l1->l2->l3);
-    free(test_val->l1->l2);
-    free(test_val->l1);
+    free(test_val->l1[0]->l2[0]->l3[0]);
+    free(test_val->l1[0]->l2[0]);
+    free(test_val->l1[0]);
     free(test_val);
 
     return 0;
